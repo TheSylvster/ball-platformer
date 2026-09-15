@@ -183,6 +183,15 @@
                     <input id="mp-room-input" type="text" placeholder="paste room code here" style="width:95%;margin-top:4px;padding:6px;background:#000;color:#0f0;border:2px inset #666;font-family:monospace;font-size:13px;">
                 </div>
                 <div id="mp-status" style="font-size:11px;color:#888;margin-bottom:8px;min-height:1.2em;text-align:center;"></div>
+                <div id="mp-host-settings" style="display:none;background:#111;border:2px solid #555;padding:8px;margin-bottom:10px;">
+                    <div style="color:#ffff00;font-size:12px;margin-bottom:6px;">HOST SETTINGS</div>
+                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#ddd;margin-bottom:4px;cursor:pointer;">
+                        <input type="checkbox" id="mp-opt-guns" checked> allow the "ihaveagun" cheat (everyone, you included)
+                    </label>
+                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#ddd;cursor:pointer;">
+                        <input type="checkbox" id="mp-opt-flyedit" checked> allow other players' fly / edit mode
+                    </label>
+                </div>
                 <div style="display:flex;flex-direction:column;gap:6px;">
                     <button id="mp-btn-create" style="padding:8px;background:#333;color:#ffff00;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:14px;">Create server</button>
                     <button id="mp-btn-join" style="padding:8px;background:#333;color:#ffff00;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:14px;">Join with code</button>
@@ -1221,6 +1230,10 @@ class LanMultiplayer {
         this.menuOpen = false;
         this._ready = typeof Peer !== "undefined";
         this._iceServersPromise = this._fetchIceServers();
+        // room settings: as host these are what I'm enforcing on everyone else
+        // (guns) / other players (fly+edit); as client these are what the
+        // host told me is currently allowed
+        this.settings = { gunsAllowed: true, flyEditAllowed: true };
 
         this.elMenu = document.getElementById("mp-menu");
         this.elWarn = document.getElementById("mp-warn");
@@ -1248,6 +1261,20 @@ class LanMultiplayer {
         bind("mp-warn-no", () => this._hideWarn());
         bind("mp-join-yes", () => this.respondJoin(true));
         bind("mp-join-no", () => this.respondJoin(false));
+
+        const gunsBox = document.getElementById("mp-opt-guns");
+        if (gunsBox) gunsBox.addEventListener("change", () => {
+            if (this.role !== "host") { gunsBox.checked = this.settings.gunsAllowed !== false; return; }
+            this.settings.gunsAllowed = gunsBox.checked;
+            this._broadcastSettings();
+            this._applySettings();
+        });
+        const flyEditBox = document.getElementById("mp-opt-flyedit");
+        if (flyEditBox) flyEditBox.addEventListener("change", () => {
+            if (this.role !== "host") { flyEditBox.checked = this.settings.flyEditAllowed !== false; return; }
+            this.settings.flyEditAllowed = flyEditBox.checked;
+            this._broadcastSettings();
+        });
 
         setInterval(() => this._sendPos(), 25); // 40hz – smoother for fly
         setInterval(() => this._sendWorld(), 50);
@@ -1304,6 +1331,36 @@ class LanMultiplayer {
         if (btn) btn.style.display = this.role ? "block" : "none";
         const rs = document.getElementById("mp-btn-resync");
         if (rs) rs.style.display = this.role ? "block" : "none";
+        const hs = document.getElementById("mp-host-settings");
+        if (hs) hs.style.display = this.role === "host" ? "block" : "none";
+        const gunsBox = document.getElementById("mp-opt-guns");
+        if (gunsBox) gunsBox.checked = this.settings.gunsAllowed !== false;
+        const flyEditBox = document.getElementById("mp-opt-flyedit");
+        if (flyEditBox) flyEditBox.checked = this.settings.flyEditAllowed !== false;
+    }
+
+    _broadcastSettings() {
+        if (this.role !== "host") return;
+        this._broadcast({ type: "host-settings", gunsAllowed: this.settings.gunsAllowed, flyEditAllowed: this.settings.flyEditAllowed });
+    }
+
+    // enforce the current settings on THIS client's own player: guns are a
+    // full room-wide off switch (host included); fly/edit only restrict
+    // non-host players so the host keeps their build tools
+    _applySettings() {
+        const plr = this.game.plr;
+        if (!plr) return;
+        if (this.settings.gunsAllowed === false && plr.hasGun) {
+            plr.hasGun = false;
+        }
+        if (this.settings.flyEditAllowed === false && this.role === "client") {
+            let changed = false;
+            if (plr.flying) { plr.flying = false; changed = true; }
+            if (plr.editMode.active) { plr.editMode.setActive(false); changed = true; }
+            if (changed) {
+                try { setPlayerNoclipMode(plr, plr.flying || plr.editMode.active); } catch (e) {}
+            }
+        }
     }
 
     resyncLevel() {
@@ -1420,6 +1477,7 @@ class LanMultiplayer {
         }
         if (this.role) this.leave();
         this.role = "host";
+        this.settings = { gunsAllowed: true, flyEditAllowed: true };
         this._setStatus("Starting host…");
         const peer = await this._newPeer();
         if (this.role !== "host" || this.peer !== peer) return; // left while connecting
@@ -1458,6 +1516,7 @@ class LanMultiplayer {
         if (!code) return;
         if (this.role) this.leave();
         this.role = "client";
+        this.settings = { gunsAllowed: true, flyEditAllowed: true };
         this.roomId = code.trim();
         this._setStatus("Connecting to " + this.roomId + "…");
         this._updateRoomDisplay();
@@ -1542,6 +1601,7 @@ class LanMultiplayer {
         this.role = null;
         this.roomId = null;
         this.pendingJoin = null;
+        this.settings = { gunsAllowed: true, flyEditAllowed: true }; // don't carry a stale room's restrictions into solo play
         if (this.elJoinReq) this.elJoinReq.style.display = "none";
         this._setStatus("");
         this._updateLeaveBtn();
@@ -1658,6 +1718,16 @@ class LanMultiplayer {
             return;
         }
 
+        if (msg.type === "host-settings") {
+            if (this.role === "client") {
+                this.settings.gunsAllowed = msg.gunsAllowed !== false;
+                this.settings.flyEditAllowed = msg.flyEditAllowed !== false;
+                this._applySettings();
+                this._updateLeaveBtn();
+            }
+            return;
+        }
+
         if (msg.type === "spawn") {
             this._handleSpawn(msg);
             return;
@@ -1710,6 +1780,7 @@ class LanMultiplayer {
             this.connections.set(peerId, conn);
             this._ensurePeer(clientId || peerId, username, 80, -20);
             this._setStatus(username + " joined – syncing level…");
+            this._sendTo(conn, { type: "host-settings", gunsAllowed: this.settings.gunsAllowed, flyEditAllowed: this.settings.flyEditAllowed });
             // push level after a tick so the data channel is fully ready
             const c = conn;
             setTimeout(() => this.sendFullLevel(c), 100);
@@ -2380,6 +2451,13 @@ class Game {
             this.canv.ctx.fillText("*** CHEAT ACTIVATED: I HAVE A GUN ***", 10, 60);
         }
 
+        // host-disabled fly/edit flash
+        if(Date.now() < this.plr._setBlockedMsgUntil) {
+            this.canv.ctx.fillStyle = "#ff6666";
+            this.canv.ctx.font = "bold 14px Comic Sans MS, cursive, sans-serif";
+            this.canv.ctx.fillText("*** the host has disabled this ***", 10, 78);
+        }
+
         if(this.plr.editMode.active) {
             this.plr.editMode.draw();
             this.canv.ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -2486,6 +2564,7 @@ class Player {
         this.hasGun = false;
         this._cheatBuffer = "";
         this._gunMsgUntil = 0;
+        this._setBlockedMsgUntil = 0; // brief "host disabled this" flash
         this.bullets = [];
         const GUN_ORBIT_R = 34;
         const BULLET_SPEED = 900;
@@ -2612,11 +2691,17 @@ class Player {
             // gameplay controls so WASD-equivalents work on AZERTY/QWERTZ/etc too.
             if(e.code) this.keysDown[e.code] = true;
 
+            // host can disable fly/edit for everyone but themselves
+            const flyEditBlocked = g.lan && g.lan.role === "client" && g.lan.settings && g.lan.settings.flyEditAllowed === false;
+
             // Edit Mode (E) and Fly (F)
             if(e.code === window.BP_KEYBINDS.edit && !e.ctrlKey && !e.altKey && !e.metaKey && !g.lockEditMode) {
                 // Don't toggle if typing in a prop panel input
                 if(document.activeElement && (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "SELECT" || document.activeElement.tagName === "TEXTAREA")) {
                     // allow normal typing
+                } else if(flyEditBlocked) {
+                    e.preventDefault();
+                    this._setBlockedMsgUntil = Date.now() + 2000;
                 } else {
                     e.preventDefault();
                     this.editMode.setActive(!this.editMode.active);
@@ -2629,6 +2714,9 @@ class Player {
             if(e.code === window.BP_KEYBINDS.fly && !e.ctrlKey && !e.altKey && !e.metaKey) {
                 if(document.activeElement && (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "SELECT" || document.activeElement.tagName === "TEXTAREA")) {
                     // allow typing "f" in inputs
+                } else if(flyEditBlocked) {
+                    e.preventDefault();
+                    this._setBlockedMsgUntil = Date.now() + 2000;
                 } else {
                     e.preventDefault();
                     this.flying = !this.flying;
@@ -2657,8 +2745,12 @@ class Player {
                 if(e.key && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
                     this._cheatBuffer = (this._cheatBuffer + e.key.toLowerCase()).slice(-20);
                     if(!this.hasGun && this._cheatBuffer.endsWith("ihaveagun")) {
-                        this.hasGun = true;
-                        this._gunMsgUntil = Date.now() + 2500;
+                        if(!g.lan || !g.lan.settings || g.lan.settings.gunsAllowed !== false) {
+                            this.hasGun = true;
+                            this._gunMsgUntil = Date.now() + 2500;
+                        } else {
+                            this._setBlockedMsgUntil = Date.now() + 2000;
+                        }
                         this._cheatBuffer = "";
                     }
                 }
@@ -2706,6 +2798,7 @@ class Player {
         // selecting stuff in edit mode – that already owns left click there)
         g.canv.el.addEventListener("mousedown", (e) => {
             if(e.button !== 0 || !this.hasGun || this.editMode.active) return;
+            if(g.lan && g.lan.settings && g.lan.settings.gunsAllowed === false) { this.hasGun = false; return; }
             this.shoot();
         });
 

@@ -127,10 +127,6 @@
                     <tr style="background:#2a2a2a;"><td style="padding:5px 8px; color:#ffff00;"><b id="ctrl-label-m">M</b></td><td style="padding:5px 8px;">multiplayer (room codes)</td></tr>
                 </table>
                 <div id="ctrl-layout-note" style="text-align:center; font-size:10px; color:#888; margin-top:6px;"></div>
-                <div id="ctrl-scan-box" style="display:none; text-align:center; margin-top:8px; padding:8px; background:#111; border:2px dashed #ffff00;">
-                    <div style="font-size:12px; color:#0f0;">scanning your keyboard...</div>
-                    <div style="font-size:16px; color:#fff; margin-top:4px;">press the key for: <b id="ctrl-scan-action" style="color:#ffff00;">???</b></div>
-                </div>
                 <hr style="border:none; border-top:1px solid #555; margin:12px 0;">
                 <div style="text-align:center;">
                     <span style="color:#ff6666; font-size:12px;">under construction</span><br>
@@ -140,7 +136,7 @@
                         font-family:Arial, sans-serif; font-size:14px; cursor:pointer;
                     ">click me</button>
                 </div>
-                <p id="ctrl-dismiss-hint" style="margin:12px 0 0; text-align:center; color:#888; font-size:11px;">or press any key lol</p>
+                <p style="margin:12px 0 0; text-align:center; color:#888; font-size:11px;">or press any key lol</p>
             </div>
         </div>
 
@@ -3029,77 +3025,52 @@ updateOptionsPanel(mode === "edit");
     <script>
     new Game();
 
-    // Label the controls popup with the actual character each physical key
-    // types on the player's own keyboard layout (e.g. AZERTY shows Z/Q/S/D
-    // instead of W/A/S/D, since the game listens by key *position*, not key).
-    // Three tiers, in order: (A) the native Keyboard API (Chrome/Edge only –
-    // Firefox and Safari don't implement it), (B) a layout we already learned
-    // from this player on a previous visit (any browser), (C) a quick
-    // interactive scan that asks them to press each control key once – this
-    // is the only way to reliably detect a layout in browsers without (A).
-    const CTRL_CODE_TO_ID = { KeyW: "w", KeyA: "a", KeyD: "d", KeyE: "e", KeyF: "f", KeyM: "m" };
-    const LAYOUT_STORAGE_KEY = "bp_keyLayoutLabels";
-
-    function loadStoredLayout() {
-        try { return JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY)) || {}; }
-        catch(e) { return {}; }
-    }
-    function saveStoredLayout(map) {
-        try { localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(map)); } catch(e) {}
-    }
-    function applyLayoutLabels(map) {
-        for(const [code, id] of Object.entries(CTRL_CODE_TO_ID)) {
-            const ch = map[code];
-            if(ch) {
-                const el = document.getElementById("ctrl-label-" + id);
-                if(el) el.textContent = ch.toUpperCase();
-            }
-        }
-    }
-
-    (async function detectKeyboardLayout() {
-        const learned = loadStoredLayout();
-        applyLayoutLabels(learned); // show whatever we already know right away
-
-        const popup = document.getElementById("controls-popup");
+    // Controls popup labels: the game reads controls by physical key
+    // *position* (KeyboardEvent.code), which is always defined relative to
+    // a standard QWERTY reference grid — regardless of what layout is active
+    // or what character is printed on the keycap (true for AZERTY hardware
+    // and for software remaps like Dvorak alike). So "press W/A/S/D/E/F/M"
+    // really means "press the key in that QWERTY position", which is exactly
+    // what's already printed in the popup by default — no per-user
+    // translation is actually required for the controls to be correct.
+    //
+    // As a purely cosmetic, fully-automatic nicety, Chrome/Edge can tell us
+    // what character a player's own layout produces at each of those
+    // positions via the Keyboard API, so we show that instead when available
+    // (e.g. AZERTY sees "Z Q S D" instead of "W A S D"). No user interaction
+    // involved; if the API is unavailable (Firefox/Safari) the popup simply
+    // keeps its default QWERTY-position labels plus a clarifying note.
+    (async function labelControlsForKeyboardLayout() {
+        const codeToId = { KeyW: "w", KeyA: "a", KeyD: "d", KeyE: "e", KeyF: "f", KeyM: "m" };
         const note = document.getElementById("ctrl-layout-note");
-        const scanBox = document.getElementById("ctrl-scan-box");
-        const scanActionEl = document.getElementById("ctrl-scan-action");
-        const dismissHint = document.getElementById("ctrl-dismiss-hint");
-        let onScanKey = null; // assigned only if Tier C (interactive scan) runs
-
-        // Tier A: native API
-        let complete = Object.keys(CTRL_CODE_TO_ID).every(c => learned[c]);
-        if(!complete) {
-            try {
-                if(navigator.keyboard && navigator.keyboard.getLayoutMap) {
-                    const layoutMap = await navigator.keyboard.getLayoutMap();
-                    for(const code of Object.keys(CTRL_CODE_TO_ID)) {
-                        const ch = layoutMap.get(code);
-                        if(ch) learned[code] = ch;
-                    }
-                    complete = Object.keys(CTRL_CODE_TO_ID).every(c => learned[c]);
-                    if(complete) {
-                        applyLayoutLabels(learned);
-                        saveStoredLayout(learned);
-                        if(note) note.textContent = "(auto-detected for your keyboard)";
+        try {
+            if(navigator.keyboard && navigator.keyboard.getLayoutMap) {
+                const layoutMap = await navigator.keyboard.getLayoutMap();
+                for(const [code, id] of Object.entries(codeToId)) {
+                    const ch = layoutMap.get(code);
+                    if(ch) {
+                        const el = document.getElementById("ctrl-label-" + id);
+                        if(el) el.textContent = ch.toUpperCase();
                     }
                 }
-            } catch(e) { /* unsupported / blocked – fall through */ }
-        } else if(note) {
-            note.textContent = "(remembered from last time)";
-        }
+                if(note) note.textContent = "(auto-detected for your keyboard – these are physical key positions)";
+                return;
+            }
+        } catch(e) { /* unsupported / blocked – fall through */ }
+        if(note) note.textContent = "(QWERTY key positions – on other layouts, press the key in that position)";
+    })();
 
+    // Controls popup dismiss
+    (function() {
+        const popup = document.getElementById("controls-popup");
         if(!popup) return;
-
         const dismiss = () => {
             popup.style.transition = "opacity 0.25s ease";
             popup.style.opacity = "0";
             setTimeout(() => popup.remove(), 260);
-            window.removeEventListener("keydown", onDismissKey);
-            window.removeEventListener("keydown", onScanKey, true); // in case dismissed mid-scan
+            window.removeEventListener("keydown", onKey);
         };
-        const onDismissKey = (e) => {
+        const onKey = (e) => {
             if(["Control","Shift","Alt","Meta"].includes(e.key)) return;
             dismiss();
         };
@@ -3107,47 +3078,7 @@ updateOptionsPanel(mode === "edit");
         popup.addEventListener("click", (e) => {
             if(e.target === popup) dismiss();
         });
-
-        if(complete) {
-            window.addEventListener("keydown", onDismissKey);
-            return;
-        }
-
-        // Tier C: this browser can't tell us the layout and we've never seen
-        // this player before – ask them to press each control key once.
-        const scanSteps = [
-            { code: "KeyW", label: "JUMP" },
-            { code: "KeyA", label: "MOVE LEFT" },
-            { code: "KeyD", label: "MOVE RIGHT" },
-            { code: "KeyE", label: "EDIT MODE" },
-            { code: "KeyF", label: "FLY MODE" },
-            { code: "KeyM", label: "MULTIPLAYER MENU" },
-        ].filter(s => !learned[s.code]); // skip any we already know
-        let step = 0;
-        if(scanBox) scanBox.style.display = "block";
-        if(dismissHint) dismissHint.style.display = "none";
-        const showStep = () => { if(scanActionEl) scanActionEl.textContent = scanSteps[step].label; };
-        showStep();
-
-        onScanKey = (e) => {
-            if(["Control","Shift","Alt","Meta","Tab"].includes(e.key)) return;
-            e.preventDefault();
-            e.stopImmediatePropagation(); // don't also trigger game hotkeys mid-scan
-            learned[scanSteps[step].code] = e.key;
-            applyLayoutLabels({ [scanSteps[step].code]: e.key });
-            step++;
-            if(step >= scanSteps.length) {
-                saveStoredLayout(learned);
-                window.removeEventListener("keydown", onScanKey, true);
-                if(note) note.textContent = "(detected from your keypresses)";
-                if(scanBox) scanBox.style.display = "none";
-                if(dismissHint) dismissHint.style.display = "block";
-                window.addEventListener("keydown", onDismissKey);
-            } else {
-                showStep();
-            }
-        };
-        window.addEventListener("keydown", onScanKey, true);
+        window.addEventListener("keydown", onKey);
     })();
 
 </script>

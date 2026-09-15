@@ -2249,6 +2249,10 @@ class Game {
             */
         }
 
+        // "ihaveagun" cheat: pistol orbiting the player + its bullets
+        this.plr.drawBullets(this.canv.ctx);
+        this.plr.drawGun(this.canv.ctx);
+
         /*
         if(mode === "edit" && editStart) {
             let x = Math.min(editStart[0], editCurr[0]), y = Math.min(editStart[1], editCurr[1]);
@@ -2293,6 +2297,13 @@ class Game {
             this.canv.ctx.fillStyle = "#ff6666";
             this.canv.ctx.font = "12px Arial, sans-serif";
             this.canv.ctx.fillText("wasd = move   shift = faster   lol", 10, 42);
+        }
+
+        // "ihaveagun" cheat activation flash
+        if(this.plr.hasGun && Date.now() < this.plr._gunMsgUntil) {
+            this.canv.ctx.fillStyle = "#ffff00";
+            this.canv.ctx.font = "bold 16px Comic Sans MS, cursive, sans-serif";
+            this.canv.ctx.fillText("*** CHEAT ACTIVATED: I HAVE A GUN ***", 10, 60);
         }
 
         if(this.plr.editMode.active) {
@@ -2397,6 +2408,66 @@ class Player {
         this.flying = false;
         this.editMode = new EditMode();
 
+        // "ihaveagun" cheat
+        this.hasGun = false;
+        this._cheatBuffer = "";
+        this._gunMsgUntil = 0;
+        this.bullets = [];
+        const GUN_ORBIT_R = 34;
+        const BULLET_SPEED = 900;
+        const BULLET_LIFETIME = 1.2;
+        this._gunTransform = () => {
+            const mx = this.editMode.canvMouseX - g.canv.camTransform[4];
+            const my = this.editMode.canvMouseY - g.canv.camTransform[5];
+            const angle = Math.atan2(my - this.body.y, mx - this.body.x);
+            return { x: this.body.x + Math.cos(angle)*GUN_ORBIT_R, y: this.body.y + Math.sin(angle)*GUN_ORBIT_R, angle };
+        };
+        this.shoot = () => {
+            const { x, y, angle } = this._gunTransform();
+            this.bullets.push({ x, y, vx: Math.cos(angle)*BULLET_SPEED, vy: Math.sin(angle)*BULLET_SPEED, age: 0 });
+        };
+        this.updateBullets = () => {
+            if(!this.bullets.length) return;
+            const dt = 1/TARGET_FPS;
+            for(let i = this.bullets.length - 1; i >= 0; i--) {
+                const b = this.bullets[i];
+                b.x += b.vx*dt;
+                b.y += b.vy*dt;
+                b.age += dt;
+                let hit = b.age > BULLET_LIFETIME;
+                if(!hit) {
+                    for(const obj of g.world.objs) {
+                        if((obj.type === "solid" || obj.type === "box") && obj.testPoint(b.x, b.y)) { hit = true; break; }
+                    }
+                }
+                if(hit) this.bullets.splice(i, 1);
+            }
+        };
+        this.drawGun = (ctx) => {
+            if(!this.hasGun) return;
+            const { x, y, angle } = this._gunTransform();
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(angle);
+            ctx.fillStyle = "#888888";
+            ctx.strokeStyle = "#333333";
+            ctx.lineWidth = 1;
+            ctx.fillRect(-4, -3, 18, 6);   // barrel
+            ctx.strokeRect(-4, -3, 18, 6);
+            ctx.fillRect(-8, 2, 6, 10);    // grip
+            ctx.strokeRect(-8, 2, 6, 10);
+            ctx.restore();
+        };
+        this.drawBullets = (ctx) => {
+            if(!this.bullets.length) return;
+            ctx.fillStyle = "#ffe066";
+            for(const b of this.bullets) {
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, 3, 0, Math.PI*2);
+                ctx.fill();
+            }
+        };
+
         /*
         // Editing
         let editStart = null;
@@ -2498,6 +2569,18 @@ class Player {
                 if(e.code === "KeyN") { e.preventDefault(); g.lan.respondJoin(false); }
             }
 
+            // "ihaveagun" cheat code – type it anywhere outside a text field
+            if(!(document.activeElement && (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "SELECT" || document.activeElement.tagName === "TEXTAREA"))) {
+                if(e.key && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+                    this._cheatBuffer = (this._cheatBuffer + e.key.toLowerCase()).slice(-20);
+                    if(!this.hasGun && this._cheatBuffer.endsWith("ihaveagun")) {
+                        this.hasGun = true;
+                        this._gunMsgUntil = Date.now() + 2500;
+                        this._cheatBuffer = "";
+                    }
+                }
+            }
+
             /*
             const editModes = ["makerect", "makecircle", "makeconstraint", "select"];
             const constraintEditTypes = ["rope", "rod"];
@@ -2534,6 +2617,13 @@ class Player {
             this.keysDown[e.key] = false;
             this.keysDown[e.key.toLowerCase()] = false;
             if(e.code) this.keysDown[e.code] = false;
+        });
+
+        // Shoot with the "ihaveagun" pistol on left click (not while dragging/
+        // selecting stuff in edit mode – that already owns left click there)
+        g.canv.el.addEventListener("mousedown", (e) => {
+            if(e.button !== 0 || !this.hasGun || this.editMode.active) return;
+            this.shoot();
         });
 
         const updateTouchState = (e) => {
@@ -2636,6 +2726,8 @@ class Player {
 
         if(this.editMode.active)
             this.editMode.update();
+
+        this.updateBullets();
 
         Object.assign(this.prevKeysDown, this.keysDown);
     }
@@ -2994,8 +3086,13 @@ class EditMode {
                 if(b.setLinearVelocity) b.setLinearVelocity(planck.Vec2(0, 0));
                 if(b.setAngularVelocity) b.setAngularVelocity(0);
                 if(b.setAwake) b.setAwake(true);
+                // drop out of the simulation entirely while held so it can't
+                // collide with (or get shoved by) anything as you drag it
+                if(b.setActive) b.setActive(false);
             } else {
                 b.setGravityScale(1);
+                if(b.setActive) b.setActive(true);
+                if(b.setAwake) b.setAwake(true);
             }
         } catch(e) {}
     }

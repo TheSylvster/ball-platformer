@@ -1332,6 +1332,22 @@ class LanMultiplayer {
             console.warn("Peer error", err);
             this._setStatus("Peer error: " + (err.type || err.message || err));
         });
+        // The connection to the signaling broker (not the P2P link) can drop
+        // silently (network blip, backgrounded tab, broker idle timeout) while
+        // the page keeps thinking it's still hosting/joined. Without reconnecting,
+        // the room code goes dead server-side and joiners get "peer-unavailable".
+        peer.on("disconnected", () => {
+            if (peer.destroyed || peer !== this.peer) return;
+            console.warn("Peer disconnected from signaling server, reconnecting…");
+            this._setStatus("Lost connection to server – reconnecting…");
+            setTimeout(() => {
+                if (!peer.destroyed && peer === this.peer) peer.reconnect();
+            }, 500);
+        });
+        peer.on("close", () => {
+            if (peer !== this.peer) return;
+            this._setStatus("Signaling connection closed");
+        });
         return peer;
     }
 
@@ -1344,6 +1360,7 @@ class LanMultiplayer {
         this.role = "host";
         this._setStatus("Starting host…");
         const peer = this._newPeer();
+        let announced = false;
 
         peer.on("open", (id) => {
             this.clientId = id;
@@ -1358,6 +1375,9 @@ class LanMultiplayer {
             this._updateRoomDisplay();
             this._updateLeaveBtn();
             if (this.elRoomInput) this.elRoomInput.value = "";
+            // "open" re-fires with the same id after a reconnect – only alert once
+            if (announced) return;
+            announced = true;
             alert("Server up!\n\nRoom code:\n" + id + "\n\nShare that code. Others: M → paste → Join with code");
         });
 
@@ -1380,8 +1400,13 @@ class LanMultiplayer {
         this._updateRoomDisplay();
 
         const peer = this._newPeer();
+        let connected = false;
         peer.on("open", (id) => {
             this.clientId = id;
+            // "open" re-fires with the same id after a broker reconnect – don't
+            // open a second DataConnection to the host if we already have one.
+            if (connected) return;
+            connected = true;
             const conn = peer.connect(this.roomId, { reliable: true });
             this._wireConn(conn, false);
             conn.on("open", () => {

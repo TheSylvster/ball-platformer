@@ -118,14 +118,15 @@
                 </div>
                 <hr style="border:none; border-top:1px solid #555; margin:10px 0;">
                 <table style="width:100%; border-collapse:collapse; font-size:14px;">
-                    <tr style="background:#2a2a2a;"><td style="padding:5px 8px; color:#ffff00; width:90px;"><b>A / D</b></td><td style="padding:5px 8px;">move left / right</td></tr>
-                    <tr><td style="padding:5px 8px; color:#ffff00;"><b>W</b></td><td style="padding:5px 8px;">jump</td></tr>
-                    <tr style="background:#2a2a2a;"><td style="padding:5px 8px; color:#ffff00;"><b>F</b></td><td style="padding:5px 8px;">fly mode (cheat)</td></tr>
-                    <tr><td style="padding:5px 8px; color:#ffff00;"><b>E</b></td><td style="padding:5px 8px;">edit mode + props</td></tr>
+                    <tr style="background:#2a2a2a;"><td style="padding:5px 8px; color:#ffff00; width:90px;"><b id="ctrl-label-a">A</b> / <b id="ctrl-label-d">D</b></td><td style="padding:5px 8px;">move left / right</td></tr>
+                    <tr><td style="padding:5px 8px; color:#ffff00;"><b id="ctrl-label-w">W</b></td><td style="padding:5px 8px;">jump</td></tr>
+                    <tr style="background:#2a2a2a;"><td style="padding:5px 8px; color:#ffff00;"><b id="ctrl-label-f">F</b></td><td style="padding:5px 8px;">fly mode (cheat)</td></tr>
+                    <tr><td style="padding:5px 8px; color:#ffff00;"><b id="ctrl-label-e">E</b></td><td style="padding:5px 8px;">edit mode + props</td></tr>
                     <tr style="background:#2a2a2a;"><td style="padding:5px 8px; color:#ffff00;"><b>Shift</b></td><td style="padding:5px 8px;">go faster</td></tr>
                     <tr><td style="padding:5px 8px; color:#ffff00;"><b>Click</b></td><td style="padding:5px 8px;">select stuff (edit mode)</td></tr>
-                    <tr style="background:#2a2a2a;"><td style="padding:5px 8px; color:#ffff00;"><b>M</b></td><td style="padding:5px 8px;">multiplayer (room codes)</td></tr>
+                    <tr style="background:#2a2a2a;"><td style="padding:5px 8px; color:#ffff00;"><b id="ctrl-label-m">M</b></td><td style="padding:5px 8px;">multiplayer (room codes)</td></tr>
                 </table>
+                <div id="ctrl-layout-note" style="text-align:center; font-size:10px; color:#888; margin-top:6px;"></div>
                 <hr style="border:none; border-top:1px solid #555; margin:12px 0;">
                 <div style="text-align:center;">
                     <span style="color:#ff6666; font-size:12px;">under construction</span><br>
@@ -2416,9 +2417,12 @@ class Player {
         window.addEventListener("keydown", (e) => {
             this.keysDown[e.key] = true;
             this.keysDown[e.key.toLowerCase()] = true;
+            // e.code is the physical key position (layout-independent) – used for
+            // gameplay controls so WASD-equivalents work on AZERTY/QWERTZ/etc too.
+            if(e.code) this.keysDown[e.code] = true;
 
             // Edit Mode (E) and Fly (F)
-            if(e.key.toLowerCase() === "e" && !e.ctrlKey && !e.altKey && !e.metaKey && !g.lockEditMode) {
+            if(e.code === "KeyE" && !e.ctrlKey && !e.altKey && !e.metaKey && !g.lockEditMode) {
                 // Don't toggle if typing in a prop panel input
                 if(document.activeElement && (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "SELECT" || document.activeElement.tagName === "TEXTAREA")) {
                     // allow normal typing
@@ -2431,7 +2435,7 @@ class Player {
             }
 
             // Toggle fly mode with F
-            if(e.key.toLowerCase() === "f" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            if(e.code === "KeyF" && !e.ctrlKey && !e.altKey && !e.metaKey) {
                 if(document.activeElement && (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "SELECT" || document.activeElement.tagName === "TEXTAREA")) {
                     // allow typing "f" in inputs
                 } else {
@@ -2442,7 +2446,7 @@ class Player {
             }
 
             // Multiplayer menu (M)
-            if(e.key.toLowerCase() === "m" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            if(e.code === "KeyM" && !e.ctrlKey && !e.altKey && !e.metaKey) {
                 if(document.activeElement && (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "SELECT" || document.activeElement.tagName === "TEXTAREA")) {
                     // typing
                 } else if(g.lan) {
@@ -2453,8 +2457,8 @@ class Player {
 
             // Join request Y/N when popup is open
             if(g.lan && g.lan.pendingJoin) {
-                if(e.key.toLowerCase() === "y") { e.preventDefault(); g.lan.respondJoin(true); }
-                if(e.key.toLowerCase() === "n") { e.preventDefault(); g.lan.respondJoin(false); }
+                if(e.code === "KeyY") { e.preventDefault(); g.lan.respondJoin(true); }
+                if(e.code === "KeyN") { e.preventDefault(); g.lan.respondJoin(false); }
             }
 
             /*
@@ -2492,14 +2496,15 @@ class Player {
         window.addEventListener("keyup", (e) => {
             this.keysDown[e.key] = false;
             this.keysDown[e.key.toLowerCase()] = false;
+            if(e.code) this.keysDown[e.code] = false;
         });
 
         const updateTouchState = (e) => {
             e.preventDefault();
             const elems = [
-                { el: document.querySelector("#touch-left"), key: "a", pressed: false },
-                { el: document.querySelector("#touch-right"), key: "d", pressed: false },
-                { el: document.querySelector("#touch-jump"), key: "w", pressed: false },
+                { el: document.querySelector("#touch-left"), key: "KeyA", pressed: false },
+                { el: document.querySelector("#touch-right"), key: "KeyD", pressed: false },
+                { el: document.querySelector("#touch-jump"), key: "KeyW", pressed: false },
             ].filter(item => item.el); // skip if elements missing
 
             for(let touch of e.touches) {
@@ -2544,9 +2549,9 @@ class Player {
         }
         if(this.body.y > 2000) this.die();
 
-        // Controls
-        const horiz = (this.keysDown.a ? -1 : 0) + (this.keysDown.d ? 1 : 0);
-        const vert  = (this.keysDown.w ? -1 : 0) + (this.keysDown.s ? 1 : 0);
+        // Controls (by physical key position, not character – works on any layout)
+        const horiz = (this.keysDown.KeyA ? -1 : 0) + (this.keysDown.KeyD ? 1 : 0);
+        const vert  = (this.keysDown.KeyW ? -1 : 0) + (this.keysDown.KeyS ? 1 : 0);
         const shiftMult = this.keysDown.Shift ? 5 : 1;
 
         if(this.flying && !this.editMode.active) {
@@ -2569,7 +2574,7 @@ class Player {
             this.body.clearVelocity();
         } else {
             // Normal platforming
-            if(this.keysDown.w) {
+            if(this.keysDown.KeyW) {
                 let isGrounded = false;
                 for(let obj of g.world.objs) {
                     const checkXoff = obj.type === "rotator" ? 0.2 : 0.7;
@@ -3019,6 +3024,29 @@ updateOptionsPanel(mode === "edit");
     <!-- SLOT 6: INITIALIZATION AND LOOP START -->
     <script>
     new Game();
+
+    // Label the controls popup with the actual character each physical key
+    // types on the player's own keyboard layout (e.g. AZERTY shows Z/Q/S/D
+    // instead of W/A/S/D, since the game listens by key *position*, not key).
+    (async function labelControlsForKeyboardLayout() {
+        const codes = { a: "KeyA", d: "KeyD", w: "KeyW", e: "KeyE", f: "KeyF", m: "KeyM" };
+        let layoutMap = null;
+        try {
+            if(navigator.keyboard && navigator.keyboard.getLayoutMap) {
+                layoutMap = await navigator.keyboard.getLayoutMap();
+            }
+        } catch(e) { /* permission denied / unsupported – keep QWERTY labels */ }
+        if(!layoutMap) return; // e.g. Firefox/Safari don't support this API yet
+
+        for(const [id, code] of Object.entries(codes)) {
+            const ch = layoutMap.get(code);
+            if(!ch) continue;
+            const el = document.getElementById("ctrl-label-" + id);
+            if(el) el.textContent = ch.toUpperCase();
+        }
+        const note = document.getElementById("ctrl-layout-note");
+        if(note) note.textContent = "(shown for your detected keyboard layout)";
+    })();
 
     // Controls popup dismiss
     (function() {

@@ -1151,6 +1151,7 @@ class LanMultiplayer {
         this.pendingJoin = null; // { peerId, username, conn }
         this.menuOpen = false;
         this._ready = typeof Peer !== "undefined";
+        this._iceServersPromise = this._fetchIceServers();
 
         this.elMenu = document.getElementById("mp-menu");
         this.elWarn = document.getElementById("mp-warn");
@@ -1291,41 +1292,33 @@ class LanMultiplayer {
         this.clientId = null;
     }
 
-    _newPeer() {
+    // Free-tier personal TURN credentials (Metered.ca). Fetched live because
+    // the static demo openrelayproject TURN servers are dead/overloaded.
+    async _fetchIceServers() {
+        const fallback = [
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "stun:global.stun.twilio.com:3478" },
+        ];
+        try {
+            const res = await fetch(
+                "https://ball-platformer.metered.live/api/v1/turn/credentials?apiKey=e6a18d1daefed7a09e0883ffe8aac5cb02bc"
+            );
+            if (!res.ok) throw new Error("bad status " + res.status);
+            const servers = await res.json();
+            if (!Array.isArray(servers) || !servers.length) throw new Error("empty response");
+            return servers.concat(fallback);
+        } catch (e) {
+            console.warn("Could not fetch TURN credentials, falling back to STUN-only", e);
+            return fallback;
+        }
+    }
+
+    async _newPeer() {
         this._destroyPeer();
+        const iceServers = await this._iceServersPromise;
         const peer = new Peer({
             debug: 1,
-            config: {
-                iceServers: [
-                    { urls: "stun:stun.l.google.com:19302" },
-                    { urls: "stun:global.stun.twilio.com:3478" },
-                    // TURN relay (Open Relay Project, free/shared) – needed when STUN alone
-                    // can't punch through strict NATs (school/CGNAT/mobile networks etc).
-                    {
-                        urls: "stun:stun.relay.metered.ca:80",
-                    },
-                    {
-                        urls: "turn:global.relay.metered.ca:80",
-                        username: "openrelayproject",
-                        credential: "openrelayproject",
-                    },
-                    {
-                        urls: "turn:global.relay.metered.ca:80?transport=tcp",
-                        username: "openrelayproject",
-                        credential: "openrelayproject",
-                    },
-                    {
-                        urls: "turn:global.relay.metered.ca:443",
-                        username: "openrelayproject",
-                        credential: "openrelayproject",
-                    },
-                    {
-                        urls: "turns:global.relay.metered.ca:443?transport=tcp",
-                        username: "openrelayproject",
-                        credential: "openrelayproject",
-                    },
-                ],
-            },
+            config: { iceServers },
         });
         this.peer = peer;
         peer.on("error", (err) => {
@@ -1351,7 +1344,7 @@ class LanMultiplayer {
         return peer;
     }
 
-    createServer() {
+    async createServer() {
         if (!this._ready) {
             alert("PeerJS not loaded");
             return;
@@ -1359,7 +1352,8 @@ class LanMultiplayer {
         if (this.role) this.leave();
         this.role = "host";
         this._setStatus("Starting host…");
-        const peer = this._newPeer();
+        const peer = await this._newPeer();
+        if (this.role !== "host" || this.peer !== peer) return; // left while connecting
         let announced = false;
 
         peer.on("open", (id) => {
@@ -1386,7 +1380,7 @@ class LanMultiplayer {
         });
     }
 
-    _tryJoin() {
+    async _tryJoin() {
         if (!this._ready) {
             alert("PeerJS not loaded – need internet once, then refresh");
             return;
@@ -1399,7 +1393,8 @@ class LanMultiplayer {
         this._setStatus("Connecting to " + this.roomId + "…");
         this._updateRoomDisplay();
 
-        const peer = this._newPeer();
+        const peer = await this._newPeer();
+        if (this.role !== "client" || this.peer !== peer) return; // left while connecting
         let connected = false;
         peer.on("open", (id) => {
             this.clientId = id;

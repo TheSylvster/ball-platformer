@@ -942,7 +942,10 @@ registerObjType("player", class extends PhysicsObj {
         super.update();
         this.touchedLavaLastFrame = false;
     }
-    draw() { this.renderMySimpleShape("#8888ff"); }
+    draw() {
+        this.renderMySimpleShape("#8888ff");
+        drawMustacheIfMarkeplier(g.canv.ctx, this.x, this.y, g.lan && g.lan.username);
+    }
     onCollisionInSubstep(obj) {
         if(obj && obj.type === "lava") this.touchedLavaLastFrame = true;
     }
@@ -1067,6 +1070,34 @@ registerObjType("cat", class extends PhysicsObj {
 const TARGET_FPS = 60;
 
 var g;
+
+// Shared draw helpers (used for both the local player and networked peers,
+// so everyone renders the same way regardless of whose client is drawing).
+function drawPistol(ctx, x, y, angle) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    ctx.fillStyle = "#888888";
+    ctx.strokeStyle = "#333333";
+    ctx.lineWidth = 1;
+    ctx.fillRect(-4, -3, 18, 6);   // barrel
+    ctx.strokeRect(-4, -3, 18, 6);
+    ctx.fillRect(-8, 2, 6, 10);    // grip
+    ctx.strokeRect(-8, 2, 6, 10);
+    ctx.restore();
+}
+function drawMustacheIfMarkeplier(ctx, x, y, username) {
+    if(!username || username.trim().toLowerCase() !== "markeplier") return;
+    ctx.save();
+    ctx.fillStyle = "#ff69b4";
+    ctx.beginPath();
+    ctx.ellipse(x - 7, y + 3, 6, 3, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x + 7, y + 3, 6, 3, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+}
 
 // Rebindable controls (physical key positions – see BP_KEYBINDS.<action>).
 // Persisted so a player's remapping survives page reloads.
@@ -1499,9 +1530,15 @@ class LanMultiplayer {
     }
 
     leave() {
-        this._broadcast({ type: "leave", clientId: this.clientId, username: this.username });
+        // if the host is stopping the server, kick everyone with a clear notice
+        // instead of just quietly vanishing from their peer list
+        const wasHost = this.role === "host";
+        if (wasHost) {
+            this._broadcast({ type: "host-shutdown" });
+        } else {
+            this._broadcast({ type: "leave", clientId: this.clientId, username: this.username });
+        }
         for (const id of [...this.peers.keys()]) this._removePeer(id);
-        this._destroyPeer();
         this.role = null;
         this.roomId = null;
         this.pendingJoin = null;
@@ -1509,6 +1546,16 @@ class LanMultiplayer {
         this._setStatus("");
         this._updateLeaveBtn();
         this._updateRoomDisplay();
+        // give the data channel a moment to actually flush the shutdown
+        // notice before we tear down the connections that would carry it
+        if (wasHost) {
+            const peerAtShutdown = this.peer;
+            setTimeout(() => {
+                if (this.peer === peerAtShutdown) this._destroyPeer(); // no-op if a new session already replaced it
+            }, 250);
+        } else {
+            this._destroyPeer();
+        }
     }
 
     _onData(msg, conn) {
@@ -1576,6 +1623,8 @@ class LanMultiplayer {
                 p.noclip = !!(msg.noclip || msg.flying || msg.editing);
                 p.vx = typeof msg.vx === "number" ? msg.vx : 0;
                 p.vy = typeof msg.vy === "number" ? msg.vy : 0;
+                p.hasGun = !!msg.hasGun;
+                p.gunAngle = typeof msg.gunAngle === "number" ? msg.gunAngle : 0;
                 p.netT = Date.now();
                 p.lastSeen = p.netT;
             }
@@ -1601,8 +1650,24 @@ class LanMultiplayer {
             return;
         }
 
+        if (msg.type === "host-shutdown") {
+            if (this.role === "client") {
+                alert("The server has been shut down.");
+                this.leave();
+            }
+            return;
+        }
+
         if (msg.type === "spawn") {
             this._handleSpawn(msg);
+            return;
+        }
+
+        if (msg.type === "shoot") {
+            if (msg.from !== this.clientId && this.game.plr) {
+                this.game.plr.receiveRemoteBullet(msg.x, msg.y, msg.vx, msg.vy);
+            }
+            if (this.role === "host") this._broadcast(msg, conn.peer);
             return;
         }
 
@@ -1804,6 +1869,8 @@ class LanMultiplayer {
             flying: !!this.game.plr.flying,
             editing: editing,
             noclip: !!(this.game.plr.flying || editing),
+            hasGun: !!this.game.plr.hasGun,
+            gunAngle: this.game.plr.hasGun ? this.game.plr._gunTransform().angle : 0,
             t: Date.now(),
         };
         this._broadcast(msg);
@@ -1877,6 +1944,11 @@ class LanMultiplayer {
         try { data = obj.serialize(); } catch(e) { return; }
         const msg = { type: "spawn", netId: netId || obj._netId, data, from: this.clientId };
         this._broadcast(msg);
+    }
+
+    broadcastShoot({ x, y, vx, vy }) {
+        if(!this.role) return;
+        this._broadcast({ type: "shoot", from: this.clientId, x, y, vx, vy, t: Date.now() });
     }
 
     broadcastObjDelete(netId) {
@@ -2091,6 +2163,8 @@ class LanMultiplayer {
             ctx.fillStyle = p.flying ? "#88ff88" : "#5555dd";
             ctx.arc(p.x, p.y, 20, 0, Math.PI * 2);
             ctx.fill();
+            drawMustacheIfMarkeplier(ctx, p.x, p.y, p.username);
+            if (p.hasGun) drawPistol(ctx, p.x + Math.cos(p.gunAngle || 0) * 34, p.y + Math.sin(p.gunAngle || 0) * 34, p.gunAngle || 0);
             ctx.font = "12px Comic Sans MS, cursive, Arial";
             ctx.textAlign = "center";
             ctx.fillStyle = "#000";
@@ -2422,13 +2496,21 @@ class Player {
             const angle = Math.atan2(my - this.body.y, mx - this.body.x);
             return { x: this.body.x + Math.cos(angle)*GUN_ORBIT_R, y: this.body.y + Math.sin(angle)*GUN_ORBIT_R, angle };
         };
+        // lava pellets: locally-fired ones hit walls; ones fired at us by a
+        // peer (remote: true) also kill us on contact, just like real lava
         this.shoot = () => {
             const { x, y, angle } = this._gunTransform();
-            this.bullets.push({ x, y, vx: Math.cos(angle)*BULLET_SPEED, vy: Math.sin(angle)*BULLET_SPEED, age: 0 });
+            const vx = Math.cos(angle)*BULLET_SPEED, vy = Math.sin(angle)*BULLET_SPEED;
+            this.bullets.push({ x, y, vx, vy, age: 0, remote: false });
+            if(g.lan) g.lan.broadcastShoot({ x, y, vx, vy });
+        };
+        this.receiveRemoteBullet = (x, y, vx, vy) => {
+            this.bullets.push({ x, y, vx, vy, age: 0, remote: true });
         };
         this.updateBullets = () => {
             if(!this.bullets.length) return;
             const dt = 1/TARGET_FPS;
+            const killR = this.body.shape.r + 4;
             for(let i = this.bullets.length - 1; i >= 0; i--) {
                 const b = this.bullets[i];
                 b.x += b.vx*dt;
@@ -2440,30 +2522,31 @@ class Player {
                         if((obj.type === "solid" || obj.type === "box") && obj.testPoint(b.x, b.y)) { hit = true; break; }
                     }
                 }
+                if(!hit && b.remote) {
+                    const dx = b.x - this.body.x, dy = b.y - this.body.y;
+                    if(dx*dx + dy*dy < killR*killR) {
+                        this.die();
+                        hit = true;
+                    }
+                }
                 if(hit) this.bullets.splice(i, 1);
             }
         };
         this.drawGun = (ctx) => {
             if(!this.hasGun) return;
             const { x, y, angle } = this._gunTransform();
-            ctx.save();
-            ctx.translate(x, y);
-            ctx.rotate(angle);
-            ctx.fillStyle = "#888888";
-            ctx.strokeStyle = "#333333";
-            ctx.lineWidth = 1;
-            ctx.fillRect(-4, -3, 18, 6);   // barrel
-            ctx.strokeRect(-4, -3, 18, 6);
-            ctx.fillRect(-8, 2, 6, 10);    // grip
-            ctx.strokeRect(-8, 2, 6, 10);
-            ctx.restore();
+            drawPistol(ctx, x, y, angle);
         };
         this.drawBullets = (ctx) => {
             if(!this.bullets.length) return;
-            ctx.fillStyle = "#ffe066";
             for(const b of this.bullets) {
+                ctx.fillStyle = "#ff4500";
                 ctx.beginPath();
-                ctx.arc(b.x, b.y, 3, 0, Math.PI*2);
+                ctx.arc(b.x, b.y, 4, 0, Math.PI*2);
+                ctx.fill();
+                ctx.fillStyle = "#ffcc00";
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, 2, 0, Math.PI*2);
                 ctx.fill();
             }
         };

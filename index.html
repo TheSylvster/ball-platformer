@@ -134,9 +134,31 @@
                         margin-top:10px; padding:6px 18px;
                         background:#333; color:#ffff00; border:2px outset #888;
                         font-family:Arial, sans-serif; font-size:14px; cursor:pointer;
-                    ">click me</button>
+                    ">click me</button><br>
+                    <button id="controls-rebind-btn" style="
+                        margin-top:8px; padding:4px 12px;
+                        background:#222; color:#0ff; border:2px outset #666;
+                        font-family:Arial, sans-serif; font-size:12px; cursor:pointer;
+                    ">rebind keys</button>
                 </div>
                 <p style="margin:12px 0 0; text-align:center; color:#888; font-size:11px;">or press any key lol</p>
+            </div>
+        </div>
+
+        <!-- Rebind keys menu -->
+        <div id="rebind-menu" style="display:none;position:absolute;inset:0;z-index:110;
+            background:rgba(0,0,0,0.9);font-family:Arial, Helvetica, sans-serif;
+            align-items:center;justify-content:center;">
+            <div style="background:#222;border:4px solid #0ff;padding:16px;max-width:340px;width:90%;color:#eee;">
+                <div style="text-align:center;font-size:18px;color:#0ff;font-weight:bold;margin-bottom:10px;">REBIND KEYS</div>
+                <div id="rebind-rows" style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
+                    <!-- filled by JS -->
+                </div>
+                <div id="rebind-status" style="text-align:center;font-size:11px;color:#888;min-height:1.2em;margin-top:8px;"></div>
+                <div style="display:flex;gap:8px;justify-content:center;margin-top:10px;">
+                    <button id="rebind-reset-btn" style="padding:6px 12px;background:#333;color:#f88;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:12px;">reset defaults</button>
+                    <button id="rebind-close-btn" style="padding:6px 12px;background:#333;color:#ffff00;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:12px;">done</button>
+                </div>
             </div>
         </div>
 
@@ -1045,6 +1067,21 @@ registerObjType("cat", class extends PhysicsObj {
 const TARGET_FPS = 60;
 
 var g;
+
+// Rebindable controls (physical key positions – see BP_KEYBINDS.<action>).
+// Persisted so a player's remapping survives page reloads.
+const KEYBIND_DEFAULTS = { left: "KeyA", right: "KeyD", jump: "KeyW", down: "KeyS", fly: "KeyF", edit: "KeyE", multiplayer: "KeyM" };
+const KEYBIND_STORAGE_KEY = "bp_keybinds";
+function loadKeybinds() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(KEYBIND_STORAGE_KEY));
+        return raw ? Object.assign({}, KEYBIND_DEFAULTS, raw) : Object.assign({}, KEYBIND_DEFAULTS);
+    } catch(e) { return Object.assign({}, KEYBIND_DEFAULTS); }
+}
+function saveKeybinds() {
+    try { localStorage.setItem(KEYBIND_STORAGE_KEY, JSON.stringify(window.BP_KEYBINDS)); } catch(e) {}
+}
+window.BP_KEYBINDS = loadKeybinds();
 
 class Canvas {
     constructor(el) {
@@ -2422,7 +2459,7 @@ class Player {
             if(e.code) this.keysDown[e.code] = true;
 
             // Edit Mode (E) and Fly (F)
-            if(e.code === "KeyE" && !e.ctrlKey && !e.altKey && !e.metaKey && !g.lockEditMode) {
+            if(e.code === window.BP_KEYBINDS.edit && !e.ctrlKey && !e.altKey && !e.metaKey && !g.lockEditMode) {
                 // Don't toggle if typing in a prop panel input
                 if(document.activeElement && (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "SELECT" || document.activeElement.tagName === "TEXTAREA")) {
                     // allow normal typing
@@ -2435,7 +2472,7 @@ class Player {
             }
 
             // Toggle fly mode with F
-            if(e.code === "KeyF" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            if(e.code === window.BP_KEYBINDS.fly && !e.ctrlKey && !e.altKey && !e.metaKey) {
                 if(document.activeElement && (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "SELECT" || document.activeElement.tagName === "TEXTAREA")) {
                     // allow typing "f" in inputs
                 } else {
@@ -2446,7 +2483,7 @@ class Player {
             }
 
             // Multiplayer menu (M)
-            if(e.code === "KeyM" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            if(e.code === window.BP_KEYBINDS.multiplayer && !e.ctrlKey && !e.altKey && !e.metaKey) {
                 if(document.activeElement && (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "SELECT" || document.activeElement.tagName === "TEXTAREA")) {
                     // typing
                 } else if(g.lan) {
@@ -2502,9 +2539,9 @@ class Player {
         const updateTouchState = (e) => {
             e.preventDefault();
             const elems = [
-                { el: document.querySelector("#touch-left"), key: "KeyA", pressed: false },
-                { el: document.querySelector("#touch-right"), key: "KeyD", pressed: false },
-                { el: document.querySelector("#touch-jump"), key: "KeyW", pressed: false },
+                { el: document.querySelector("#touch-left"), key: window.BP_KEYBINDS.left, pressed: false },
+                { el: document.querySelector("#touch-right"), key: window.BP_KEYBINDS.right, pressed: false },
+                { el: document.querySelector("#touch-jump"), key: window.BP_KEYBINDS.jump, pressed: false },
             ].filter(item => item.el); // skip if elements missing
 
             for(let touch of e.touches) {
@@ -2550,8 +2587,9 @@ class Player {
         if(this.body.y > 2000) this.die();
 
         // Controls (by physical key position, not character – works on any layout)
-        const horiz = (this.keysDown.KeyA ? -1 : 0) + (this.keysDown.KeyD ? 1 : 0);
-        const vert  = (this.keysDown.KeyW ? -1 : 0) + (this.keysDown.KeyS ? 1 : 0);
+        const binds = window.BP_KEYBINDS;
+        const horiz = (this.keysDown[binds.left] ? -1 : 0) + (this.keysDown[binds.right] ? 1 : 0);
+        const vert  = (this.keysDown[binds.jump] ? -1 : 0) + (this.keysDown[binds.down] ? 1 : 0);
         const shiftMult = this.keysDown.Shift ? 5 : 1;
 
         if(this.flying && !this.editMode.active) {
@@ -2574,7 +2612,7 @@ class Player {
             this.body.clearVelocity();
         } else {
             // Normal platforming
-            if(this.keysDown.KeyW) {
+            if(this.keysDown[window.BP_KEYBINDS.jump]) {
                 let isGrounded = false;
                 for(let obj of g.world.objs) {
                     const checkXoff = obj.type === "rotator" ? 0.2 : 0.7;
@@ -3025,39 +3063,139 @@ updateOptionsPanel(mode === "edit");
     <script>
     new Game();
 
-    // Controls popup labels: the game reads controls by physical key
-    // *position* (KeyboardEvent.code), which is always defined relative to
-    // a standard QWERTY reference grid — regardless of what layout is active
-    // or what character is printed on the keycap (true for AZERTY hardware
-    // and for software remaps like Dvorak alike). So "press W/A/S/D/E/F/M"
-    // really means "press the key in that QWERTY position", which is exactly
-    // what's already printed in the popup by default — no per-user
-    // translation is actually required for the controls to be correct.
+    // Controls popup labels + rebinding.
     //
-    // As a purely cosmetic, fully-automatic nicety, Chrome/Edge can tell us
-    // what character a player's own layout produces at each of those
-    // positions via the Keyboard API, so we show that instead when available
-    // (e.g. AZERTY sees "Z Q S D" instead of "W A S D"). No user interaction
-    // involved; if the API is unavailable (Firefox/Safari) the popup simply
-    // keeps its default QWERTY-position labels plus a clarifying note.
-    (async function labelControlsForKeyboardLayout() {
-        const codeToId = { KeyW: "w", KeyA: "a", KeyD: "d", KeyE: "e", KeyF: "f", KeyM: "m" };
+    // The game reads controls by physical key *position* (KeyboardEvent.code),
+    // which is always defined relative to a standard QWERTY reference grid —
+    // regardless of what layout is active or what character is printed on the
+    // keycap (true for AZERTY hardware and for software remaps like Dvorak
+    // alike). So the default labels (W/A/S/D/E/F/M) are already correct
+    // instructions on any layout. As a cosmetic nicety we translate them to
+    // the player's actual layout via the Keyboard API where available
+    // (Chrome/Edge only). Players can also fully rebind any action to any
+    // physical key via the "rebind keys" button, stored in window.BP_KEYBINDS
+    // (see KEYBIND_DEFAULTS / loadKeybinds / saveKeybinds, defined earlier).
+    const POPUP_LABEL_ACTIONS = { left: "a", right: "d", jump: "w", fly: "f", edit: "e", multiplayer: "m" };
+    const REBIND_ROWS = [
+        { action: "left", label: "move left" },
+        { action: "right", label: "move right" },
+        { action: "jump", label: "jump / up" },
+        { action: "down", label: "fly down" },
+        { action: "fly", label: "fly mode" },
+        { action: "edit", label: "edit mode" },
+        { action: "multiplayer", label: "multiplayer menu" },
+    ];
+    const SPECIAL_CODE_NAMES = {
+        Space: "SPACE", Enter: "ENTER", Tab: "TAB", Escape: "ESC",
+        ShiftLeft: "L-SHIFT", ShiftRight: "R-SHIFT", ControlLeft: "L-CTRL", ControlRight: "R-CTRL",
+        AltLeft: "L-ALT", AltRight: "R-ALT",
+        ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→",
+    };
+    let _bpLayoutMap = null; // cached Keyboard API layout map, if available
+
+    function friendlyKeyLabel(code) {
+        if(!code) return "?";
+        if(_bpLayoutMap && _bpLayoutMap.has(code)) {
+            const ch = _bpLayoutMap.get(code);
+            if(ch) return ch.length === 1 ? ch.toUpperCase() : ch;
+        }
+        if(code.startsWith("Key")) return code.slice(3);
+        if(code.startsWith("Digit")) return code.slice(5);
+        return SPECIAL_CODE_NAMES[code] || code;
+    }
+
+    function refreshPopupLabels() {
         const note = document.getElementById("ctrl-layout-note");
+        for(const [action, id] of Object.entries(POPUP_LABEL_ACTIONS)) {
+            const el = document.getElementById("ctrl-label-" + id);
+            if(el) el.textContent = friendlyKeyLabel(window.BP_KEYBINDS[action]);
+        }
+        if(note) {
+            note.textContent = _bpLayoutMap
+                ? "(auto-detected for your keyboard – or click \"rebind keys\" to customize)"
+                : "(QWERTY key positions – or click \"rebind keys\" to customize)";
+        }
+    }
+
+    (async function initKeyboardLayout() {
         try {
             if(navigator.keyboard && navigator.keyboard.getLayoutMap) {
-                const layoutMap = await navigator.keyboard.getLayoutMap();
-                for(const [code, id] of Object.entries(codeToId)) {
-                    const ch = layoutMap.get(code);
-                    if(ch) {
-                        const el = document.getElementById("ctrl-label-" + id);
-                        if(el) el.textContent = ch.toUpperCase();
-                    }
-                }
-                if(note) note.textContent = "(auto-detected for your keyboard – these are physical key positions)";
-                return;
+                _bpLayoutMap = await navigator.keyboard.getLayoutMap();
             }
-        } catch(e) { /* unsupported / blocked – fall through */ }
-        if(note) note.textContent = "(QWERTY key positions – on other layouts, press the key in that position)";
+        } catch(e) { /* unsupported / blocked – fine, stick with QWERTY labels */ }
+        refreshPopupLabels();
+    })();
+
+    // Rebind menu
+    (function() {
+        const menu = document.getElementById("rebind-menu");
+        const rowsEl = document.getElementById("rebind-rows");
+        const statusEl = document.getElementById("rebind-status");
+        const openBtn = document.getElementById("controls-rebind-btn");
+        if(!menu || !rowsEl || !openBtn) return;
+
+        let capturing = null; // action currently waiting for a keypress, or null
+
+        function buildRows() {
+            rowsEl.innerHTML = "";
+            for(const row of REBIND_ROWS) {
+                const line = document.createElement("div");
+                line.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;";
+                const name = document.createElement("span");
+                name.textContent = row.label;
+                name.style.color = "#ddd";
+                const btn = document.createElement("button");
+                btn.textContent = capturing === row.action ? "press a key…" : friendlyKeyLabel(window.BP_KEYBINDS[row.action]);
+                btn.style.cssText = "min-width:90px;padding:4px 8px;background:#333;color:#ffff00;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:12px;";
+                btn.addEventListener("click", () => startCapture(row.action));
+                line.appendChild(name);
+                line.appendChild(btn);
+                rowsEl.appendChild(line);
+            }
+        }
+
+        function startCapture(action) {
+            if(capturing) return; // one at a time
+            capturing = action;
+            if(statusEl) statusEl.textContent = "press any key (Esc to cancel)…";
+            buildRows();
+            window.addEventListener("keydown", onCaptureKey, true);
+        }
+
+        const onCaptureKey = (e) => {
+            e.preventDefault();
+            e.stopImmediatePropagation(); // don't also trigger game hotkeys / dismiss the popup
+            const action = capturing;
+            capturing = null;
+            window.removeEventListener("keydown", onCaptureKey, true);
+            if(e.code === "Escape") {
+                if(statusEl) statusEl.textContent = "cancelled";
+            } else {
+                window.BP_KEYBINDS[action] = e.code;
+                saveKeybinds();
+                if(statusEl) statusEl.textContent = "";
+                refreshPopupLabels();
+            }
+            buildRows();
+        };
+
+        openBtn.addEventListener("click", () => {
+            buildRows();
+            menu.style.display = "flex";
+        });
+        document.getElementById("rebind-reset-btn").addEventListener("click", () => {
+            window.BP_KEYBINDS = Object.assign({}, KEYBIND_DEFAULTS);
+            saveKeybinds();
+            refreshPopupLabels();
+            buildRows();
+            if(statusEl) statusEl.textContent = "reset to defaults";
+        });
+        document.getElementById("rebind-close-btn").addEventListener("click", () => {
+            menu.style.display = "none";
+        });
+        menu.addEventListener("click", (e) => {
+            if(e.target === menu) menu.style.display = "none";
+        });
     })();
 
     // Controls popup dismiss
@@ -3072,6 +3210,9 @@ updateOptionsPanel(mode === "edit");
         };
         const onKey = (e) => {
             if(["Control","Shift","Alt","Meta"].includes(e.key)) return;
+            // don't dismiss while the rebind menu is open on top of this popup
+            const rebindMenu = document.getElementById("rebind-menu");
+            if(rebindMenu && rebindMenu.style.display !== "none") return;
             dismiss();
         };
         document.getElementById("controls-popup-btn").addEventListener("click", dismiss);

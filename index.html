@@ -184,11 +184,11 @@
                 </div>
                 <div id="mp-status" style="font-size:11px;color:#888;margin-bottom:8px;min-height:1.2em;text-align:center;"></div>
                 <div id="mp-host-settings" style="display:none;background:#111;border:2px solid #555;padding:8px;margin-bottom:10px;">
-                    <div style="color:#ffff00;font-size:12px;margin-bottom:6px;">HOST SETTINGS</div>
-                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#ddd;margin-bottom:4px;cursor:pointer;">
-                        <input type="checkbox" id="mp-opt-guns" checked> allow the "ihaveagun" cheat (everyone, you included)
+                    <div id="mp-host-settings-title" style="color:#ffff00;font-size:12px;margin-bottom:6px;">HOST SETTINGS</div>
+                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#ddd;margin-bottom:4px;">
+                        <input type="checkbox" id="mp-opt-guns" checked> allow the "ihaveagun" cheat (everyone, host included)
                     </label>
-                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#ddd;cursor:pointer;">
+                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#ddd;">
                         <input type="checkbox" id="mp-opt-flyedit" checked> allow other players' fly / edit mode
                     </label>
                 </div>
@@ -1331,12 +1331,22 @@ class LanMultiplayer {
         if (btn) btn.style.display = this.role ? "block" : "none";
         const rs = document.getElementById("mp-btn-resync");
         if (rs) rs.style.display = this.role ? "block" : "none";
+        // shown to host (editable) AND clients (read-only, so they can see
+        // the current rules even though only the host can change them)
         const hs = document.getElementById("mp-host-settings");
-        if (hs) hs.style.display = this.role === "host" ? "block" : "none";
+        if (hs) hs.style.display = this.role ? "block" : "none";
+        const title = document.getElementById("mp-host-settings-title");
+        if (title) title.textContent = this.role === "host" ? "HOST SETTINGS" : "ROOM SETTINGS (set by host)";
         const gunsBox = document.getElementById("mp-opt-guns");
-        if (gunsBox) gunsBox.checked = this.settings.gunsAllowed !== false;
+        if (gunsBox) {
+            gunsBox.checked = this.settings.gunsAllowed !== false;
+            gunsBox.disabled = this.role !== "host";
+        }
         const flyEditBox = document.getElementById("mp-opt-flyedit");
-        if (flyEditBox) flyEditBox.checked = this.settings.flyEditAllowed !== false;
+        if (flyEditBox) {
+            flyEditBox.checked = this.settings.flyEditAllowed !== false;
+            flyEditBox.disabled = this.role !== "host";
+        }
     }
 
     _broadcastSettings() {

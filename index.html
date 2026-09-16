@@ -3258,6 +3258,13 @@ class EditMode {
         this._initPalette();
         this._initRopeTool();
 
+        window.addEventListener("keydown", (e) => {
+            if(!this.active || this.sel.length === 0 || e.code !== "KeyX") return;
+            const t = document.activeElement;
+            if(t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
+            this._deleteSel();
+        });
+
         this.mDown = false;
         this.mDownX = 0;
         this.mDownY = 0;
@@ -3569,14 +3576,15 @@ class EditMode {
         });
 
         const delBtn = panel.querySelector("#prop-delete-btn");
-        if(delBtn) delBtn.addEventListener("click", () => {
-            for(const o of [...this.sel]) {
-                if(o.type !== "player") o.destroy();
-            }
-            this.setSel([]);
-        });
+        if(delBtn) delBtn.addEventListener("click", () => this._deleteSel());
         const desBtn = panel.querySelector("#prop-deselect-btn");
         if(desBtn) desBtn.addEventListener("click", () => this.setSel([]));
+    }
+    _deleteSel() {
+        for(const o of [...this.sel]) {
+            if(o.type !== "player") o.destroy();
+        }
+        this.setSel([]);
     }
     registerDestroyedObj(obj) { // Called by object class
         if(this.sel.includes(obj))
@@ -3653,6 +3661,16 @@ class EditMode {
             if(g.lan && g.lan.role) {
                 try { g.lan.broadcastObjMoves(this.sel); } catch(e) { console.warn(e); }
             }
+        } else if(this.currAction === "marquee") {
+            // shift/ctrl-drag over empty space, Windows-desktop-icon style:
+            // select everything whose center fell inside the dragged box,
+            // added to (not replacing) whatever was already selected
+            const x0 = Math.min(this.mDownX, x), x1 = Math.max(this.mDownX, x);
+            const y0 = Math.min(this.mDownY, y), y1 = Math.max(this.mDownY, y);
+            const hit = g.world.objs.filter(o => o && o.type !== "player" && o.type !== "constraint" &&
+                o.x >= x0 && o.x <= x1 && o.y >= y0 && o.y <= y1);
+            this.setSel([...new Set([...this.sel, ...hit])]);
+            this.currAction = "none";
         } else if(this.currAction === "none" && Math.hypot(x-this.mDownX, y-this.mDownY) < 5) {
             const obj = g.world.getObjFromClickPoint(this.mDownX, this.mDownY);
             if(g.plr.keysDown.Shift || g.plr.keysDown.Control)
@@ -3680,6 +3698,13 @@ class EditMode {
                 obj.x += dx;
                 obj.y += dy;
             }
+        } else if(this.mDown && this.currAction === "none" &&
+            (g.plr.keysDown.Shift || g.plr.keysDown.Control) &&
+            !this.sel.includes(g.world.getObjFromClickPoint(this.mDownX, this.mDownY)) &&
+            Math.hypot(x-this.mDownX, y-this.mDownY) >= 5) {
+            // shift/ctrl held, didn't grab a selected object: start a marquee
+            // box instead (finalized on mouseUp, drawn live in draw())
+            this.currAction = "marquee";
         }
     }
 
@@ -3859,6 +3884,16 @@ class EditMode {
         if(gizmoObj) this._drawGizmo(gizmoObj);
 
         if(this.ropeToolActive) this._drawRopeToolPreview();
+
+        if(this.currAction === "marquee") {
+            const x0 = Math.min(this.mDownX, this.mouseX), x1 = Math.max(this.mDownX, this.mouseX);
+            const y0 = Math.min(this.mDownY, this.mouseY), y1 = Math.max(this.mDownY, this.mouseY);
+            g.canv.ctx.fillStyle = "rgba(80,160,255,0.15)";
+            g.canv.ctx.strokeStyle = "#66aaff";
+            g.canv.ctx.lineWidth = 1;
+            g.canv.ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+            g.canv.ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+        }
 
         if(this.currAction === "none") {
             const obj = g.world.getObjFromClickPoint(this.mouseX, this.mouseY);

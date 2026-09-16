@@ -1473,17 +1473,25 @@ class LanMultiplayer {
         const input = document.getElementById("level-save-name");
         const name = input && input.value.trim();
         if (!name) { alert("Type a name for the level first"); return; }
+        let json;
+        try {
+            json = this.game.getLevelJSON();
+        } catch (e) {
+            alert("Failed to save level: " + e.message);
+            return;
+        }
         const saved = this._getSavedLevels();
-        saved[name] = this.game.getLevelJSON();
+        saved[name] = json;
         this._setSavedLevels(saved);
         if (input) input.value = "";
         this._refreshLevelsList();
         this._setStatus('Saved level "' + name + '"');
     }
-    _deleteSavedLevel(name) {
+    _deleteSavedLevel(key) {
         if (!this._canManageLevels()) return;
+        if (!key.startsWith("s:")) return; // only custom saves are deletable
         const saved = this._getSavedLevels();
-        delete saved[name];
+        delete saved[key.slice(2)];
         this._setSavedLevels(saved);
         this._refreshLevelsList();
     }
@@ -2620,52 +2628,68 @@ class Game {
         let objs = levelData.objs;
         let objDataByI = new Map(objs.map((obj, i) => [i, obj]));
         let objCreatedByI = new Map(objs.map((obj, i) => [i, null]));
-        for(let [i, data] of objs.entries()) {
-            if(levelData.levelDataVersion === "v2") {
-                data.props = {};
-                for(let [k, v] of Object.entries(data)) {
-                    if(k !== "type" && k !== "id" && k !== "props")
-                        data.props[k] = v;
-                }
-            }
-            let obj = createObj(structuredClone({ type: data.type, physicsType: data.physicsType }));
-            function setProps(table, propsData) {
-                // We need to handle initPriority since some properties only appear after others have been set (for example, shape.r)
-                let propsToDo = Object.entries(propsData);
-                const getPriority = k => table.list().find(p => p.name === k)?.initPriority ?? -Infinity;
-                while(propsToDo.length > 0) {
-                    let prop = propsToDo.sort((a, b) => {
-                        let diff = getPriority(b[0]) - getPriority(a[0]);
-                        if(Number.isNaN(diff)) return 0;
-                        else return diff;
-                    }).shift();
-                    let [k, v] = prop;
+        function setProps(table, propsData) {
+            // We need to handle initPriority since some properties only appear after others have been set (for example, shape.r)
+            let propsToDo = Object.entries(propsData);
+            const getPriority = k => table.list().find(p => p.name === k)?.initPriority ?? -Infinity;
+            while(propsToDo.length > 0) {
+                let prop = propsToDo.sort((a, b) => {
+                    let diff = getPriority(b[0]) - getPriority(a[0]);
+                    if(Number.isNaN(diff)) return 0;
+                    else return diff;
+                }).shift();
+                let [k, v] = prop;
 
-                    let propObj = table.list().find(p => p.name === k);
-                    if(!propObj) throw new Error("prop does not exist but in level data: " + k);
-                    if(propObj.type === "subwritabletable")
-                        setProps(table.get(k), v);
-                    else
-                        table.set(k, v);
+                let propObj = table.list().find(p => p.name === k);
+                if(!propObj) throw new Error("prop does not exist but in level data: " + k);
+                if(propObj.type === "subwritabletable")
+                    setProps(table.get(k), v);
+                else
+                    table.set(k, v);
+            }
+        }
+        for(let [i, data] of objs.entries()) {
+            try {
+                if(levelData.levelDataVersion === "v2") {
+                    data.props = {};
+                    for(let [k, v] of Object.entries(data)) {
+                        if(k !== "type" && k !== "id" && k !== "props")
+                            data.props[k] = v;
+                    }
                 }
+                let obj = createObj(structuredClone({ type: data.type, physicsType: data.physicsType }));
+                if(data.shape) {
+                    let type = data.shape.type;
+                    delete data.shape.type;
+                    data.shape.type = type;
+                }
+                setProps(obj.props, data.props);
+                objCreatedByI.set(i, obj);
+            } catch(e) {
+                // one bad/unrecognized object shouldn't sink the whole level load
+                console.warn("Failed to load an object from level data, skipping it", data && data.type, e);
             }
-            if(data.shape) {
-                let type = data.shape.type;
-                delete data.shape.type;
-                data.shape.type = type;
-            }
-            setProps(obj.props, data.props);
-            objCreatedByI.set(i, obj);
         }
         for(let constraint of levelData.constraints) {
-            let objA = objCreatedByI.get(levelData.objs.findIndex(o => o.id === constraint.idA));
-            let objB = objCreatedByI.get(levelData.objs.findIndex(o => o.id === constraint.idB));
-            let obj = createObj({ type: "constraint", objA, objB });
-            obj.props.set("variant", constraint.type);
-            obj.props.set("x", objA.body.getWorldPoint(planck.Vec2(constraint.lx1, constraint.ly1)).x);
-            obj.props.set("y", objA.body.getWorldPoint(planck.Vec2(constraint.lx1, constraint.ly1)).y);
-            obj.props.set("x2", objB.body.getWorldPoint(planck.Vec2(constraint.lx2, constraint.ly2)).x);
-            obj.props.set("y2", objB.body.getWorldPoint(planck.Vec2(constraint.lx2, constraint.ly2)).y);
+            try {
+                let objA = objCreatedByI.get(levelData.objs.findIndex(o => o.id === constraint.idA));
+                let objB = objCreatedByI.get(levelData.objs.findIndex(o => o.id === constraint.idB));
+                if(!objA || !objB) {
+                    // stale save from before constraints were linked by id (used
+                    // to be netId-based) – can't be resolved, so skip it rather
+                    // than aborting the rest of the level
+                    console.warn("Skipping unresolvable constraint in level data", constraint);
+                    continue;
+                }
+                let obj = createObj({ type: "constraint", objA, objB });
+                obj.props.set("variant", constraint.type);
+                obj.props.set("x", objA.body.getWorldPoint(planck.Vec2(constraint.lx1, constraint.ly1)).x);
+                obj.props.set("y", objA.body.getWorldPoint(planck.Vec2(constraint.lx1, constraint.ly1)).y);
+                obj.props.set("x2", objB.body.getWorldPoint(planck.Vec2(constraint.lx2, constraint.ly2)).x);
+                obj.props.set("y2", objB.body.getWorldPoint(planck.Vec2(constraint.lx2, constraint.ly2)).y);
+            } catch(e) {
+                console.warn("Failed to reconstruct a constraint, skipping it", e);
+            }
         }
     }
     getLevelJSON() {

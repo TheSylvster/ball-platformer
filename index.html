@@ -185,6 +185,11 @@
                         <input id="level-save-name" type="text" placeholder="save current level as..." style="flex:1;min-width:0;padding:5px;background:#000;color:#0f0;border:2px inset #666;font-family:monospace;font-size:12px;">
                         <button id="level-save-btn" style="padding:5px 10px;background:#333;color:#ffff00;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:12px;">save</button>
                     </div>
+                    <div style="display:flex;gap:6px;margin-top:6px;">
+                        <button id="level-export-btn" style="flex:1;padding:5px;background:#333;color:#0ff;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:11px;">export .txt</button>
+                        <button id="level-import-btn" style="flex:1;padding:5px;background:#333;color:#0ff;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:11px;">import .txt</button>
+                        <input id="level-import-file" type="file" accept=".txt,text/plain" style="display:none;">
+                    </div>
                     <div style="font-size:10px;color:#ff8844;margin-top:6px;text-align:center;">⚠ saved levels live only in this browser's storage — this game is early/unstable, so they can get wiped without warning. Don't rely on them long-term.</div>
                     <div id="levels-note" style="font-size:10px;color:#888;margin-top:4px;text-align:center;"></div>
                 </div>
@@ -229,6 +234,18 @@
                     <button id="mp-updates-close-btn" style="padding:3px 9px;background:#333;color:#aaa;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:12px;">x</button>
                 </div>
                 <div id="mp-updates-list" style="display:flex;flex-direction:column;gap:10px;font-size:11px;line-height:1.4;">
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Export / import levels</div>
+                        <div style="color:#ccc;">Levels can now be exported to a downloadable .txt file and imported back in from one, so you can share or back them up outside the browser. Files from an older game version still load, with a warning that things may be broken.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Multiselect + delete key</div>
+                        <div style="color:#ccc;">In edit mode, press X to delete whatever's selected. Hold Shift or Ctrl and drag over empty space to draw a selection box and multiselect props, like on a Windows desktop.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Update log</div>
+                        <div style="color:#ccc;">Added this Updates panel so you can see a running history of everything that's changed.</div>
+                    </div>
                     <div style="border-bottom:1px solid #444;padding-bottom:8px;">
                         <div style="color:#0f0;font-weight:bold;">Stretchy triangles</div>
                         <div style="color:#ccc;">Triangles can now be resized by width and height independently, using the same drag handles as boxes.</div>
@@ -1161,6 +1178,11 @@ registerObjType("cat", class extends PhysicsObj {
 // TODO: display error if window onerror maybe?
 
 const TARGET_FPS = 60;
+// Bump this whenever the level format/object types change enough that an
+// exported level from an older version might not load cleanly. Exported
+// level files carry this so an import can warn "may be broken" instead of
+// just silently failing or crashing.
+const GAME_VERSION = "1.0";
 
 // Embedded cat photo (from cutecats.net via Wayback Machine, resized/re-encoded to a small static PNG)
 const CAT_IMG = new Image();
@@ -1375,6 +1397,17 @@ class LanMultiplayer {
         });
 
         bind("level-save-btn", () => this._saveCurrentLevel());
+        bind("level-export-btn", () => this._exportLevel());
+        bind("level-import-btn", () => {
+            const el = document.getElementById("level-import-file");
+            if (el) el.click();
+        });
+        const importFileEl = document.getElementById("level-import-file");
+        if (importFileEl) importFileEl.addEventListener("change", () => {
+            const file = importFileEl.files && importFileEl.files[0];
+            importFileEl.value = "";
+            if (file) this._importLevelFile(file);
+        });
         if (this.elLevelsList) {
             this.elLevelsList.addEventListener("click", (e) => {
                 const loadKey = e.target.getAttribute("data-load");
@@ -1547,6 +1580,9 @@ class LanMultiplayer {
         const saveInput = document.getElementById("level-save-name");
         if (saveBtn) saveBtn.disabled = !canManage;
         if (saveInput) saveInput.disabled = !canManage;
+        // export is read-only, so it stays enabled for clients too
+        const importBtn = document.getElementById("level-import-btn");
+        if (importBtn) importBtn.disabled = !canManage;
     }
     _loadLevelByKey(key) {
         if (!this._canManageLevels()) return;
@@ -1590,6 +1626,62 @@ class LanMultiplayer {
         delete saved[key.slice(2)];
         this._setSavedLevels(saved);
         this._refreshLevelsList();
+    }
+    _exportLevel() {
+        // read-only (doesn't touch the shared level), so unlike save/load/
+        // delete this is allowed for clients too, not just the host
+        let json;
+        try {
+            json = this.game.getLevelJSON();
+        } catch (e) {
+            alert("Failed to export level: " + e.message);
+            return;
+        }
+        const nameInput = document.getElementById("level-save-name");
+        const name = (nameInput && nameInput.value.trim()) || "level";
+        const blob = new Blob([json], { type: "text/plain" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = name.replace(/[^a-z0-9_\-]+/gi, "_") + ".txt";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        this._setStatus('Exported level "' + name + '"');
+    }
+    _importLevelFile(file) {
+        if (!file || !this._canManageLevels()) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            const text = String(reader.result || "");
+            let parsed;
+            try {
+                parsed = JSON.parse(text);
+            } catch (e) {
+                alert("That doesn't look like a valid level file.");
+                return;
+            }
+            if (!Array.isArray(parsed.objs)) {
+                alert("That doesn't look like a valid level file.");
+                return;
+            }
+            if (parsed.gameVersion !== GAME_VERSION) {
+                alert("This level was exported from a different version of the game (" +
+                    (parsed.gameVersion || "unknown, likely very old") + " vs current " + GAME_VERSION +
+                    "). It should still load, but some things may be broken.");
+            }
+            try {
+                this.game.loadLevel(text);
+            } catch (e) {
+                alert("Failed to load level: " + e.message);
+                return;
+            }
+            if (this.role === "host") this.sendFullLevel();
+            this._setStatus("Level imported");
+            this.toggleMenu(false);
+        };
+        reader.readAsText(file);
     }
 
     resyncLevel() {
@@ -2809,6 +2901,7 @@ class Game {
         objs.forEach((o, i) => idOf.set(o, i));
         return JSON.stringify({
             levelDataVersion: "v3",
+            gameVersion: GAME_VERSION,
             levelSaveTime: Math.round(Date.now()/1000),
             objs: objs.map((obj, i) => {
                 const data = obj.serialize();

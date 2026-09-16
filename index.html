@@ -2070,7 +2070,7 @@ class LanMultiplayer {
                     a = o.body.getAngle ? o.body.getAngle() : (o.angle || 0);
                 }
             } catch(e) {}
-            updates.push({ netId: o._netId, x: x, y: y, a: a, t: o.type });
+            updates.push({ netId: o._netId, x: x, y: y, a: a, t: o.type, shape: o.shape ? structuredClone(o.shape) : undefined });
         }
         if(!updates.length) return;
         const msg = { type: "obj-move", from: this.clientId, updates: updates, t: Date.now() };
@@ -2090,6 +2090,12 @@ class LanMultiplayer {
             const o = byId.get(u.netId);
             if(!o) continue;
             try {
+                // resize (from the F3X-style gizmo, or the props panel) must
+                // land before the position, since box/triangle resizes shift
+                // the object's center relative to the corner/edge you dragged
+                if(u.shape && o.reshapeSimpleShape) {
+                    try { o.reshapeSimpleShape(structuredClone(u.shape)); } catch(e) {}
+                }
                 if(o.body) {
                     o.body.setTransform(planck.Vec2(u.x, u.y), u.a || 0);
                     if(o.body.setLinearVelocity) o.body.setLinearVelocity(planck.Vec2(0, 0));
@@ -2924,6 +2930,7 @@ class EditMode {
     constructor() {
         this.active = false;
         this.sel = [];
+        this.gizmoDrag = null; // F3X-style move/resize gizmo drag state
 
         this.propsPanel = document.querySelector("#props-panel") || document.createElement("div");
         this.sidebar = document.querySelector("#edit-sidebar");
@@ -3197,6 +3204,10 @@ class EditMode {
                         console.warn("Failed to set prop", path, err);
                     }
                 }
+                // sync prop-panel edits (position, shape, angle, etc.) to peers
+                if(g.lan && g.lan.role) {
+                    try { g.lan.broadcastObjMoves(this.sel); } catch(e) { console.warn(e); }
+                }
             };
             el.addEventListener("change", apply);
             el.addEventListener("input", apply);
@@ -3223,10 +3234,47 @@ class EditMode {
     }
 
     mouseDown(x, y) {
-
+        // F3X-style gizmo: check the move-arrow / resize-handle hitboxes
+        // first, before falling through to normal select/drag
+        const obj = this._gizmoTarget();
+        if(obj) {
+            const HIT_R = 9;
+            for(const h of this._gizmoHandles(obj)) {
+                if(Math.hypot(x - h.x, y - h.y) > HIT_R) continue;
+                this.currAction = "gizmo";
+                this._freezeForGrab(obj, true);
+                this.gizmoDrag = {
+                    obj,
+                    handle: h,
+                    startObjX: obj.x,
+                    startObjY: obj.y,
+                    startAngle: (typeof obj.angle === "number") ? obj.angle : 0,
+                    startShape: structuredClone(obj.shape),
+                };
+                if(h.kind === "resize-box") {
+                    // world position of the OPPOSITE corner/edge, which stays put
+                    const ax = -h.signX, ay = -h.signY;
+                    const hwx = this.gizmoDrag.startShape.w / 2, hwy = this.gizmoDrag.startShape.h / 2;
+                    const p = this._rot(ax * hwx, ay * hwy, this.gizmoDrag.startAngle);
+                    this.gizmoDrag.anchorWorld = { x: obj.x + p.x, y: obj.y + p.y };
+                } else if(h.kind === "resize-radial") {
+                    this.gizmoDrag.origDist = Math.hypot(h.x - obj.x, h.y - obj.y) || 1;
+                    this.gizmoDrag.origParamVal = this.gizmoDrag.startShape[h.param];
+                }
+                return;
+            }
+        }
     }
     mouseUp(x, y) {
-        if(this.currAction === "move") {
+        if(this.currAction === "gizmo") {
+            const obj = this.gizmoDrag && this.gizmoDrag.obj;
+            if(obj) this._freezeForGrab(obj, false);
+            this.currAction = "none";
+            if(obj && g.lan && g.lan.role) {
+                try { g.lan.broadcastObjMoves([obj]); } catch(e) { console.warn(e); }
+            }
+            this.gizmoDrag = null;
+        } else if(this.currAction === "move") {
             for(let obj of this.sel) this._freezeForGrab(obj, false);
             this.currAction = "none";
             // sync moved props for BOTH host and joiner
@@ -3242,7 +3290,9 @@ class EditMode {
         }
     }
     mouseMove(x, y, dx, dy) {
-        if(this.mDown && this.currAction === "none" &&
+        if(this.currAction === "gizmo" && this.gizmoDrag) {
+            this._applyGizmoDrag(x, y);
+        } else if(this.mDown && this.currAction === "none" &&
             this.sel.includes(g.world.getObjFromClickPoint(this.mDownX, this.mDownY)) &&
             Math.hypot(x-this.mDownX, y-this.mDownY) >= 5) {
             this.currAction = "move";
@@ -3256,6 +3306,104 @@ class EditMode {
                 this._freezeForGrab(obj, true);
                 obj.x += dx;
                 obj.y += dy;
+            }
+        }
+    }
+
+    // ===== F3X-style move/resize gizmo =====
+    _gizmoTarget() {
+        if(this.sel.length !== 1) return null;
+        const obj = this.sel[0];
+        if(!obj || !obj.shape || obj.type === "player" || obj.type === "constraint") return null;
+        return obj;
+    }
+    _rot(lx, ly, angle) {
+        const c = Math.cos(angle), s = Math.sin(angle);
+        return { x: lx*c - ly*s, y: lx*s + ly*c };
+    }
+    _gizmoHandles(obj) {
+        const cx = obj.x, cy = obj.y;
+        const angle = (typeof obj.angle === "number") ? obj.angle : 0;
+        const shape = obj.shape;
+        const ARROW_LEN = 55;
+        const handles = [
+            { kind: "move-x", x: cx + ARROW_LEN, y: cy, cx, cy },
+            { kind: "move-y", x: cx, y: cy + ARROW_LEN, cx, cy },
+        ];
+        if(shape.type === "box") {
+            const hwx = shape.w / 2, hwy = shape.h / 2;
+            const sides = [
+                { signX: -1, signY: -1 }, { signX: 1, signY: -1 },
+                { signX: -1, signY: 1 },  { signX: 1, signY: 1 },
+                { signX: 1, signY: 0 },   { signX: -1, signY: 0 },
+                { signX: 0, signY: 1 },   { signX: 0, signY: -1 },
+            ];
+            for(const s of sides) {
+                const p = this._rot(s.signX * hwx, s.signY * hwy, angle);
+                handles.push({ kind: "resize-box", signX: s.signX, signY: s.signY, x: cx + p.x, y: cy + p.y });
+            }
+        } else if(shape.type === "ball") {
+            const p = this._rot(shape.r, 0, angle);
+            handles.push({ kind: "resize-radial", param: "r", x: cx + p.x, y: cy + p.y });
+        } else if(shape.type === "triangle") {
+            const s = shape.s || 40;
+            const p = this._rot(s / 2, s * 0.866 * 0.4, angle);
+            handles.push({ kind: "resize-radial", param: "s", x: cx + p.x, y: cy + p.y });
+        }
+        return handles;
+    }
+    _applyGizmoDrag(mx, my) {
+        const { obj, handle, startAngle, startShape, anchorWorld } = this.gizmoDrag;
+        if(handle.kind === "move-x") {
+            obj.x = this.gizmoDrag.startObjX + (mx - handle.cx);
+        } else if(handle.kind === "move-y") {
+            obj.y = this.gizmoDrag.startObjY + (my - handle.cy);
+        } else if(handle.kind === "resize-box") {
+            const c = Math.cos(startAngle), s = Math.sin(startAngle);
+            const dxw = mx - anchorWorld.x, dyw = my - anchorWorld.y;
+            // project the world-space drag onto the object's own (rotated) axes
+            const ldx = dxw*c + dyw*s;
+            const ldy = -dxw*s + dyw*c;
+            const MIN = 10;
+            let newW = startShape.w, newH = startShape.h;
+            const shapeTable = obj.props.get("shape");
+            if(handle.signX !== 0) { newW = Math.max(MIN, handle.signX * ldx); shapeTable.set("w", newW); }
+            if(handle.signY !== 0) { newH = Math.max(MIN, handle.signY * ldy); shapeTable.set("h", newH); }
+            const p = this._rot(handle.signX * newW / 2, handle.signY * newH / 2, startAngle);
+            obj.x = anchorWorld.x + p.x;
+            obj.y = anchorWorld.y + p.y;
+        } else if(handle.kind === "resize-radial") {
+            const dist = Math.hypot(mx - obj.x, my - obj.y);
+            const scale = dist / this.gizmoDrag.origDist;
+            const newVal = Math.max(5, this.gizmoDrag.origParamVal * scale);
+            obj.props.get("shape").set(handle.param, newVal);
+        }
+    }
+    _drawGizmo(obj) {
+        const ctx = g.canv.ctx;
+        const cx = obj.x, cy = obj.y;
+        for(const h of this._gizmoHandles(obj)) {
+            if(h.kind === "move-x" || h.kind === "move-y") {
+                ctx.strokeStyle = h.kind === "move-x" ? "#ff3333" : "#33ff33";
+                ctx.fillStyle = ctx.strokeStyle;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(h.x, h.y);
+                ctx.stroke();
+                const ang = Math.atan2(h.y - cy, h.x - cx);
+                ctx.beginPath();
+                ctx.moveTo(h.x, h.y);
+                ctx.lineTo(h.x - 10*Math.cos(ang-0.4), h.y - 10*Math.sin(ang-0.4));
+                ctx.lineTo(h.x - 10*Math.cos(ang+0.4), h.y - 10*Math.sin(ang+0.4));
+                ctx.closePath();
+                ctx.fill();
+            } else {
+                ctx.fillStyle = "#ffffff";
+                ctx.strokeStyle = "#222";
+                ctx.lineWidth = 1;
+                ctx.fillRect(h.x - 5, h.y - 5, 10, 10);
+                ctx.strokeRect(h.x - 5, h.y - 5, 10, 10);
             }
         }
     }
@@ -3304,6 +3452,9 @@ class EditMode {
             obj.drawOutline();
         }
 
+        const gizmoObj = this._gizmoTarget();
+        if(gizmoObj) this._drawGizmo(gizmoObj);
+
         if(this.currAction === "none") {
             const obj = g.world.getObjFromClickPoint(this.mouseX, this.mouseY);
             if(obj) {
@@ -3323,6 +3474,8 @@ class EditMode {
             "click = select\n" +
             "shift+click = multi\n" +
             "drag = move\n" +
+            "red/green arrow = move axis\n" +
+            "white square = resize\n" +
             "shift = faster\n";
         g.canv.ctx.fillStyle = "#ffff00";
         g.canv.ctx.font = "14px Comic Sans MS, cursive, sans-serif";

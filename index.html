@@ -235,6 +235,10 @@
                 </div>
                 <div id="mp-updates-list" style="display:flex;flex-direction:column;gap:10px;font-size:11px;line-height:1.4;">
                     <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Settings available in singleplayer</div>
+                        <div style="color:#ccc;">The guns / fly-edit settings panel now shows up (and is editable) in singleplayer too, not just while hosting a room.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
                         <div style="color:#0f0;font-weight:bold;">Export / import levels</div>
                         <div style="color:#ccc;">Levels can now be exported to a downloadable .txt file and imported back in from one, so you can share or back them up outside the browser. Files from an older game version still load, with a warning that things may be broken.</div>
                     </div>
@@ -1384,14 +1388,14 @@ class LanMultiplayer {
 
         const gunsBox = document.getElementById("mp-opt-guns");
         if (gunsBox) gunsBox.addEventListener("change", () => {
-            if (this.role !== "host") { gunsBox.checked = this.settings.gunsAllowed !== false; return; }
+            if (!this._canManageLevels()) { gunsBox.checked = this.settings.gunsAllowed !== false; return; }
             this.settings.gunsAllowed = gunsBox.checked;
             this._broadcastSettings();
             this._applySettings();
         });
         const flyEditBox = document.getElementById("mp-opt-flyedit");
         if (flyEditBox) flyEditBox.addEventListener("change", () => {
-            if (this.role !== "host") { flyEditBox.checked = this.settings.flyEditAllowed !== false; return; }
+            if (!this._canManageLevels()) { flyEditBox.checked = this.settings.flyEditAllowed !== false; return; }
             this.settings.flyEditAllowed = flyEditBox.checked;
             this._broadcastSettings();
         });
@@ -1473,21 +1477,23 @@ class LanMultiplayer {
         if (btn) btn.style.display = this.role ? "block" : "none";
         const rs = document.getElementById("mp-btn-resync");
         if (rs) rs.style.display = this.role ? "block" : "none";
-        // shown to host (editable) AND clients (read-only, so they can see
-        // the current rules even though only the host can change them)
+        // shown always now: editable in singleplayer and to the host,
+        // read-only for clients (so they can still see the current rules
+        // even though only the host can change them)
         const hs = document.getElementById("mp-host-settings");
-        if (hs) hs.style.display = this.role ? "block" : "none";
+        if (hs) hs.style.display = "block";
         const title = document.getElementById("mp-host-settings-title");
-        if (title) title.textContent = this.role === "host" ? "HOST SETTINGS" : "ROOM SETTINGS (set by host)";
+        if (title) title.textContent = !this.role ? "SETTINGS" : (this.role === "host" ? "HOST SETTINGS" : "ROOM SETTINGS (set by host)");
+        const canManage = this._canManageLevels();
         const gunsBox = document.getElementById("mp-opt-guns");
         if (gunsBox) {
             gunsBox.checked = this.settings.gunsAllowed !== false;
-            gunsBox.disabled = this.role !== "host";
+            gunsBox.disabled = !canManage;
         }
         const flyEditBox = document.getElementById("mp-opt-flyedit");
         if (flyEditBox) {
             flyEditBox.checked = this.settings.flyEditAllowed !== false;
-            flyEditBox.disabled = this.role !== "host";
+            flyEditBox.disabled = !canManage;
         }
         this._refreshLevelsList();
         this._refreshControlsSidebar();

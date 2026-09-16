@@ -124,7 +124,7 @@
                     <tr><td style="padding:5px 8px; color:#ffff00;"><b id="ctrl-label-e">E</b></td><td style="padding:5px 8px;">edit mode + props</td></tr>
                     <tr style="background:#2a2a2a;"><td style="padding:5px 8px; color:#ffff00;"><b>Shift</b></td><td style="padding:5px 8px;">go faster</td></tr>
                     <tr><td style="padding:5px 8px; color:#ffff00;"><b>Click</b></td><td style="padding:5px 8px;">select stuff (edit mode)</td></tr>
-                    <tr style="background:#2a2a2a;"><td style="padding:5px 8px; color:#ffff00;"><b id="ctrl-label-m">M</b></td><td style="padding:5px 8px;">multiplayer (room codes)</td></tr>
+                    <tr style="background:#2a2a2a;"><td style="padding:5px 8px; color:#ffff00;"><b id="ctrl-label-m">M</b></td><td style="padding:5px 8px;">main menu (multiplayer + levels)</td></tr>
                 </table>
                 <div id="ctrl-layout-note" style="text-align:center; font-size:10px; color:#888; margin-top:6px;"></div>
                 <hr style="border:none; border-top:1px solid #555; margin:12px 0;">
@@ -174,8 +174,17 @@
             background:rgba(0,0,0,0.85);font-family:'Comic Sans MS',cursive,Arial,sans-serif;
             align-items:center;justify-content:center;">
             <div style="background:#222;border:4px solid #ffff00;padding:16px;max-width:460px;width:92%;color:#eee;">
-                <div style="text-align:center;font-size:22px;color:#ffff00;font-weight:bold;margin-bottom:8px;">MULTIPLAYER</div>
+                <div style="text-align:center;font-size:22px;color:#ffff00;font-weight:bold;margin-bottom:8px;">MAIN MENU</div>
                 <div style="text-align:center;font-size:12px;color:#aaa;margin-bottom:10px;">you: <span id="mp-my-name" style="color:#0f0;">Player</span></div>
+                <div id="levels-section" style="background:#111;border:2px solid #555;padding:8px;margin-bottom:10px;">
+                    <div style="color:#ffff00;font-size:13px;margin-bottom:6px;">Levels</div>
+                    <div id="levels-list" style="display:flex;flex-direction:column;gap:4px;max-height:130px;overflow-y:auto;margin-bottom:6px;"></div>
+                    <div style="display:flex;gap:6px;">
+                        <input id="level-save-name" type="text" placeholder="save current level as..." style="flex:1;min-width:0;padding:5px;background:#000;color:#0f0;border:2px inset #666;font-family:monospace;font-size:12px;">
+                        <button id="level-save-btn" style="padding:5px 10px;background:#333;color:#ffff00;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:12px;">save</button>
+                    </div>
+                    <div id="levels-note" style="font-size:10px;color:#888;margin-top:4px;text-align:center;"></div>
+                </div>
                 <div style="background:#111;border:2px solid #555;padding:8px;margin-bottom:10px;">
                     <div style="color:#ffff00;font-size:13px;margin-bottom:6px;">Room code</div>
                     <div id="mp-room-display" style="font-size:15px;color:#0f0;word-break:break-all;min-height:1.2em;">(not hosting)</div>
@@ -1211,6 +1220,8 @@ class LanMultiplayer {
         this.elRoomDisplay = document.getElementById("mp-room-display");
         this.elRoomInput = document.getElementById("mp-room-input");
         this.elStatus = document.getElementById("mp-status");
+        this.elLevelsList = document.getElementById("levels-list");
+        this.elLevelsNote = document.getElementById("levels-note");
         if (this.elMyName) this.elMyName.textContent = this.username;
 
         const bind = (id, fn) => {
@@ -1244,6 +1255,17 @@ class LanMultiplayer {
             this.settings.flyEditAllowed = flyEditBox.checked;
             this._broadcastSettings();
         });
+
+        bind("level-save-btn", () => this._saveCurrentLevel());
+        if (this.elLevelsList) {
+            this.elLevelsList.addEventListener("click", (e) => {
+                const loadKey = e.target.getAttribute("data-load");
+                const delKey = e.target.getAttribute("data-del");
+                if (loadKey) this._loadLevelByKey(loadKey);
+                else if (delKey) this._deleteSavedLevel(delKey);
+            });
+        }
+        this._refreshLevelsList();
 
         setInterval(() => this._sendPos(), 25); // 40hz – smoother for fly
         setInterval(() => this._sendWorld(), 50);
@@ -1316,6 +1338,7 @@ class LanMultiplayer {
             flyEditBox.checked = this.settings.flyEditAllowed !== false;
             flyEditBox.disabled = this.role !== "host";
         }
+        this._refreshLevelsList();
     }
 
     _broadcastSettings() {
@@ -1340,6 +1363,86 @@ class LanMultiplayer {
                 try { setPlayerNoclipMode(plr, plr.flying || plr.editMode.active); } catch (e) {}
             }
         }
+    }
+
+    // ===== Levels menu: built-in levels + locally-saved custom ones =====
+    // Loading only changes the world for everyone when the room's owner does
+    // it (or anyone, when not in a multiplayer room at all).
+    _canManageLevels() {
+        return !this.role || this.role === "host";
+    }
+    _getSavedLevels() {
+        try { return JSON.parse(localStorage.getItem("bp_savedLevels")) || {}; }
+        catch (e) { return {}; }
+    }
+    _setSavedLevels(obj) {
+        try { localStorage.setItem("bp_savedLevels", JSON.stringify(obj)); } catch (e) {}
+    }
+    _levelRowHtml(name, key, canManage, isCustom) {
+        const escName = this._esc(name);
+        const escKey = this._esc(key);
+        const dis = canManage ? "" : "disabled";
+        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:12px;color:#ddd;">
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escName}</span>
+            <span style="display:flex;gap:4px;flex-shrink:0;">
+                <button data-load="${escKey}" ${dis} style="padding:3px 8px;background:#333;color:#0f0;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:11px;">load</button>
+                ${isCustom ? `<button data-del="${escKey}" ${dis} style="padding:3px 8px;background:#400;color:#f88;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:11px;">del</button>` : ""}
+            </span>
+        </div>`;
+    }
+    _refreshLevelsList() {
+        if (!this.elLevelsList) return;
+        const canManage = this._canManageLevels();
+        const builtInNames = { "1": "Classic (default)" };
+        let html = "";
+        for (const key of Object.keys(LEVELS)) {
+            html += this._levelRowHtml(builtInNames[key] || ("Level " + key), "b:" + key, canManage, false);
+        }
+        const saved = this._getSavedLevels();
+        for (const name of Object.keys(saved)) {
+            html += this._levelRowHtml(name, "s:" + name, canManage, true);
+        }
+        this.elLevelsList.innerHTML = html || "<span style='color:#888;'>no levels</span>";
+        if (this.elLevelsNote) this.elLevelsNote.textContent = canManage ? "" : "(only the host can change levels)";
+        const saveBtn = document.getElementById("level-save-btn");
+        const saveInput = document.getElementById("level-save-name");
+        if (saveBtn) saveBtn.disabled = !canManage;
+        if (saveInput) saveInput.disabled = !canManage;
+    }
+    _loadLevelByKey(key) {
+        if (!this._canManageLevels()) return;
+        let json = null;
+        if (key.startsWith("b:")) json = LEVELS[key.slice(2)];
+        else if (key.startsWith("s:")) json = this._getSavedLevels()[key.slice(2)];
+        if (!json) return;
+        try {
+            this.game.loadLevel(json);
+        } catch (e) {
+            alert("Failed to load level: " + e.message);
+            return;
+        }
+        if (this.role === "host") this.sendFullLevel();
+        this._setStatus("Level loaded");
+        this.toggleMenu(false);
+    }
+    _saveCurrentLevel() {
+        if (!this._canManageLevels()) return;
+        const input = document.getElementById("level-save-name");
+        const name = input && input.value.trim();
+        if (!name) { alert("Type a name for the level first"); return; }
+        const saved = this._getSavedLevels();
+        saved[name] = this.game.getLevelJSON();
+        this._setSavedLevels(saved);
+        if (input) input.value = "";
+        this._refreshLevelsList();
+        this._setStatus('Saved level "' + name + '"');
+    }
+    _deleteSavedLevel(name) {
+        if (!this._canManageLevels()) return;
+        const saved = this._getSavedLevels();
+        delete saved[name];
+        this._setSavedLevels(saved);
+        this._refreshLevelsList();
     }
 
     resyncLevel() {
@@ -2676,6 +2779,15 @@ class Player {
             // gameplay controls so WASD-equivalents work on AZERTY/QWERTZ/etc too.
             if(e.code) this.keysDown[e.code] = true;
 
+            // stop Space/Arrows from scrolling the page or clicking a focused
+            // button while playing (but not while typing in a text field)
+            if(["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.code)) {
+                const t = document.activeElement;
+                if(!(t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA"))) {
+                    e.preventDefault();
+                }
+            }
+
             // host can disable fly/edit for everyone but themselves
             const flyEditBlocked = g.lan && g.lan.role === "client" && g.lan.settings && g.lan.settings.flyEditAllowed === false;
 
@@ -2837,10 +2949,15 @@ class Player {
         }
         if(this.body.y > 2000) this.die();
 
-        // Controls (by physical key position, not character – works on any layout)
+        // Controls (by physical key position, not character – works on any layout).
+        // Arrow keys and Space always work too, on top of whatever's rebound.
         const binds = window.BP_KEYBINDS;
-        const horiz = (this.keysDown[binds.left] ? -1 : 0) + (this.keysDown[binds.right] ? 1 : 0);
-        const vert  = (this.keysDown[binds.jump] ? -1 : 0) + (this.keysDown[binds.down] ? 1 : 0);
+        const leftDown = this.keysDown[binds.left] || this.keysDown.ArrowLeft;
+        const rightDown = this.keysDown[binds.right] || this.keysDown.ArrowRight;
+        const jumpDown = this.keysDown[binds.jump] || this.keysDown.ArrowUp || this.keysDown.Space;
+        const downDown = this.keysDown[binds.down] || this.keysDown.ArrowDown;
+        const horiz = (leftDown ? -1 : 0) + (rightDown ? 1 : 0);
+        const vert  = (jumpDown ? -1 : 0) + (downDown ? 1 : 0);
         const shiftMult = this.keysDown.Shift ? 5 : 1;
 
         if(this.flying && !this.editMode.active) {
@@ -2863,7 +2980,7 @@ class Player {
             this.body.clearVelocity();
         } else {
             // Normal platforming
-            if(this.keysDown[window.BP_KEYBINDS.jump]) {
+            if(jumpDown) {
                 let isGrounded = false;
                 for(let obj of g.world.objs) {
                     const checkXoff = obj.type === "rotator" ? 0.2 : 0.7;
@@ -3488,7 +3605,7 @@ updateOptionsPanel(mode === "edit");
         { action: "down", label: "fly down" },
         { action: "fly", label: "fly mode" },
         { action: "edit", label: "edit mode" },
-        { action: "multiplayer", label: "multiplayer menu" },
+        { action: "multiplayer", label: "main menu" },
     ];
     const SPECIAL_CODE_NAMES = {
         Space: "SPACE", Enter: "ENTER", Tab: "TAB", Escape: "ESC",

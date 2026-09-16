@@ -777,13 +777,14 @@ class PhysicsObj extends Obj {
                 assert_num(shapeOptions.r),
             );
         } else if(shapeOptions.type === "triangle") {
-            const s = assert_num(shapeOptions.s) || 40;
-            // equilateral-ish triangle centered at origin
-            const h = s * 0.866;
+            const w = assert_num(shapeOptions.w ?? (shapeOptions.s || 40));
+            const h = assert_num(shapeOptions.h ?? ((shapeOptions.s || 40) * 0.866));
+            // apex-up isoceles triangle, symmetric about the origin like a
+            // box's bounding box so it can share the same resize gizmo/handles
             return new planck.Polygon([
-                planck.Vec2(0, -h * 0.6),
-                planck.Vec2(s / 2, h * 0.4),
-                planck.Vec2(-s / 2, h * 0.4),
+                planck.Vec2(0, -h / 2),
+                planck.Vec2(w / 2, h / 2),
+                planck.Vec2(-w / 2, h / 2),
             ]);
         } else throw new Error("Unknown shape type in createShape: " + shapeOptions.type);
     }
@@ -793,8 +794,9 @@ class PhysicsObj extends Obj {
         } else if(shapeOptions.type === "ball") {
             return Math.PI * assert_num(shapeOptions.r) * shapeOptions.r;
         } else if(shapeOptions.type === "triangle") {
-            const s = assert_num(shapeOptions.s) || 40;
-            return 0.5 * s * (s * 0.866);
+            const w = shapeOptions.w ?? (shapeOptions.s || 40);
+            const h = shapeOptions.h ?? ((shapeOptions.s || 40) * 0.866);
+            return 0.5 * w * h;
         } else throw new Error("Unknown shape type in getArea: " + shapeOptions.type);
     }
     static renderSimpleShape(shapeOptions, x, y, angle) {
@@ -808,14 +810,14 @@ class PhysicsObj extends Obj {
             g.canv.ctx.arc(x, y, shapeOptions.r, 0, 2 * Math.PI);
             g.canv.ctx.fill();
         } else if(shapeOptions.type === "triangle") {
-            const s = shapeOptions.s || 40;
-            const h = s * 0.866;
+            const w = shapeOptions.w ?? (shapeOptions.s || 40);
+            const h = shapeOptions.h ?? ((shapeOptions.s || 40) * 0.866);
             g.canv.ctx.translate(x, y);
             g.canv.ctx.rotate(angle);
             g.canv.ctx.beginPath();
-            g.canv.ctx.moveTo(0, -h * 0.6);
-            g.canv.ctx.lineTo(s / 2, h * 0.4);
-            g.canv.ctx.lineTo(-s / 2, h * 0.4);
+            g.canv.ctx.moveTo(0, -h / 2);
+            g.canv.ctx.lineTo(w / 2, h / 2);
+            g.canv.ctx.lineTo(-w / 2, h / 2);
             g.canv.ctx.closePath();
             g.canv.ctx.fill();
             g.canv.ctx.setTransform.apply(g.canv.ctx, g.canv.camTransform);
@@ -832,14 +834,14 @@ class PhysicsObj extends Obj {
             g.canv.ctx.arc(x, y, shapeOptions.r, 0, 2 * Math.PI);
             g.canv.ctx.stroke();
         } else if(shapeOptions.type === "triangle") {
-            const s = shapeOptions.s || 40;
-            const h = s * 0.866;
+            const w = shapeOptions.w ?? (shapeOptions.s || 40);
+            const h = shapeOptions.h ?? ((shapeOptions.s || 40) * 0.866);
             g.canv.ctx.translate(x, y);
             g.canv.ctx.rotate(angle);
             g.canv.ctx.beginPath();
-            g.canv.ctx.moveTo(0, -h * 0.6);
-            g.canv.ctx.lineTo(s / 2, h * 0.4);
-            g.canv.ctx.lineTo(-s / 2, h * 0.4);
+            g.canv.ctx.moveTo(0, -h / 2);
+            g.canv.ctx.lineTo(w / 2, h / 2);
+            g.canv.ctx.lineTo(-w / 2, h / 2);
             g.canv.ctx.closePath();
             g.canv.ctx.stroke();
             g.canv.ctx.setTransform.apply(g.canv.ctx, g.canv.camTransform);
@@ -887,7 +889,8 @@ class PhysicsObj extends Obj {
                     );
                 } else if(this.shape.type === "triangle") {
                     arr.push(
-                        { name: "s", type: "number"},
+                        { name: "w", type: "number"},
+                        { name: "h", type: "number"},
                     );
                 }
                 return arr;
@@ -897,7 +900,8 @@ class PhysicsObj extends Obj {
                 else if(k === "w" && this.shape.type === "box") return this.shape.w;
                 else if(k === "h" && this.shape.type === "box") return this.shape.h;
                 else if(k === "r" && this.shape.type === "ball") return this.shape.r;
-                else if(k === "s" && this.shape.type === "triangle") return this.shape.s;
+                else if(k === "w" && this.shape.type === "triangle") return this.shape.w;
+                else if(k === "h" && this.shape.type === "triangle") return this.shape.h;
                 else throw new Error();
             },
             set: (k, v) => {
@@ -908,14 +912,15 @@ class PhysicsObj extends Obj {
                         else if(v === "ball")
                             this.shape = { type: "ball", r: 20 };
                         else if(v === "triangle")
-                            this.shape = { type: "triangle", s: 40 };
+                            this.shape = { type: "triangle", w: 40, h: 34.64 };
                         else throw new Error("Unknown shape type");
                     }
                 }
                 else if(k === "w" && this.shape.type === "box") this.shape.w = v;
                 else if(k === "h" && this.shape.type === "box") this.shape.h = v;
                 else if(k === "r" && this.shape.type === "ball") this.shape.r = v;
-                else if(k === "s" && this.shape.type === "triangle") this.shape.s = v;
+                else if(k === "w" && this.shape.type === "triangle") this.shape.w = v;
+                else if(k === "h" && this.shape.type === "triangle") this.shape.h = v;
                 else throw new Error();
                 this.reshapeSimpleShape(this.shape);
             },
@@ -3338,7 +3343,8 @@ class EditMode {
         } else if(kind === "solid-tri") {
             obj = createObj({ type: "solid" });
             obj.props.get("shape").set("type", "triangle");
-            obj.props.get("shape").set("s", 48);
+            obj.props.get("shape").set("w", 48);
+            obj.props.get("shape").set("h", 48 * 0.866);
             obj.x = x; obj.y = y;
         } else if(kind === "phys-box") {
             obj = createObj({ type: "box" });
@@ -3355,7 +3361,8 @@ class EditMode {
         } else if(kind === "phys-tri") {
             obj = createObj({ type: "box" });
             obj.props.get("shape").set("type", "triangle");
-            obj.props.get("shape").set("s", 44);
+            obj.props.get("shape").set("w", 44);
+            obj.props.get("shape").set("h", 44 * 0.866);
             obj.x = x; obj.y = y;
         } else if(kind === "cat") {
             obj = createObj({ type: "cat", physicsType: "static", shape: { type: "box", w: 48, h: 48 } });
@@ -3607,7 +3614,9 @@ class EditMode {
             { kind: "move-x", x: cx + ARROW_LEN, y: cy, cx, cy },
             { kind: "move-y", x: cx, y: cy + ARROW_LEN, cx, cy },
         ];
-        if(shape.type === "box") {
+        if(shape.type === "box" || shape.type === "triangle") {
+            // triangle's w/h describe the same symmetric bounding box as a
+            // box, so it reuses the exact same corner/edge resize handles
             const hwx = shape.w / 2, hwy = shape.h / 2;
             const sides = [
                 { signX: -1, signY: -1 }, { signX: 1, signY: -1 },
@@ -3622,10 +3631,6 @@ class EditMode {
         } else if(shape.type === "ball") {
             const p = this._rot(shape.r, 0, angle);
             handles.push({ kind: "resize-radial", param: "r", x: cx + p.x, y: cy + p.y });
-        } else if(shape.type === "triangle") {
-            const s = shape.s || 40;
-            const p = this._rot(s / 2, s * 0.866 * 0.4, angle);
-            handles.push({ kind: "resize-radial", param: "s", x: cx + p.x, y: cy + p.y });
         }
         return handles;
     }

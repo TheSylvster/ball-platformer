@@ -195,14 +195,16 @@
                     <input id="mp-room-input" type="text" placeholder="paste room code here" style="width:95%;margin-top:4px;padding:6px;background:#000;color:#0f0;border:2px inset #666;font-family:monospace;font-size:13px;">
                 </div>
                 <div id="mp-status" style="font-size:11px;color:#888;margin-bottom:8px;min-height:1.2em;text-align:center;"></div>
-                <div id="mp-host-settings" style="display:none;background:#111;border:2px solid #555;padding:8px;margin-bottom:10px;">
-                    <div id="mp-host-settings-title" style="color:#ffff00;font-size:12px;margin-bottom:6px;">HOST SETTINGS</div>
-                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#ddd;margin-bottom:4px;">
-                        <input type="checkbox" id="mp-opt-guns" checked> allow the "ihaveagun" cheat (everyone, host included)
-                    </label>
-                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#ddd;">
-                        <input type="checkbox" id="mp-opt-flyedit" checked> allow other players' fly / edit mode
-                    </label>
+                <div id="mp-host-settings" style="display:none;background:#111;border:2px solid #555;padding:6px 8px;margin-bottom:10px;">
+                    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 14px;">
+                        <div id="mp-host-settings-title" style="color:#ffff00;font-size:11px;white-space:nowrap;">HOST SETTINGS</div>
+                        <label title="allow the &quot;ihaveagun&quot; cheat (everyone, host included)" style="display:flex;align-items:center;gap:4px;font-size:12px;color:#ddd;cursor:help;white-space:nowrap;">
+                            <input type="checkbox" id="mp-opt-guns" checked> guns
+                        </label>
+                        <label title="allow other players' fly / edit mode" style="display:flex;align-items:center;gap:4px;font-size:12px;color:#ddd;cursor:help;white-space:nowrap;">
+                            <input type="checkbox" id="mp-opt-flyedit" checked> fly/edit
+                        </label>
+                    </div>
                 </div>
                 <div style="display:flex;flex-direction:column;gap:6px;">
                     <button id="mp-btn-create" style="padding:8px;background:#333;color:#ffff00;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:14px;">Create server</button>

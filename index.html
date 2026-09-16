@@ -172,7 +172,7 @@
         <!-- LAN Multiplayer menu (M) -->
         <div id="mp-menu" style="display:none;position:absolute;inset:0;z-index:90;
             background:rgba(0,0,0,0.85);font-family:'Comic Sans MS',cursive,Arial,sans-serif;
-            align-items:center;justify-content:center;">
+            align-items:center;justify-content:center;flex-wrap:wrap;gap:12px;overflow-y:auto;padding:12px 0;">
             <div style="background:#222;border:4px solid #ffff00;padding:16px;max-width:640px;width:94%;color:#eee;">
                 <div style="text-align:center;font-size:22px;color:#ffff00;font-weight:bold;margin-bottom:8px;">MAIN MENU</div>
                 <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;">
@@ -199,6 +199,7 @@
                     <button id="mp-btn-create" style="padding:8px;background:#333;color:#ffff00;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:14px;">Create server</button>
                     <button id="mp-btn-join" style="padding:8px;background:#333;color:#ffff00;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:14px;">Join with code</button>
                     <button id="mp-btn-name" style="padding:8px;background:#333;color:#0ff;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:14px;">Set Username</button>
+                    <button id="mp-btn-updates" style="padding:8px;background:#333;color:#0ff;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:14px;">Updates</button>
                     <button id="mp-btn-resync" style="padding:8px;background:#240;color:#8f8;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:13px;display:none;">Resync objects</button>
                     <button id="mp-btn-leave" style="padding:8px;background:#400;color:#f88;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:13px;display:none;">Leave / Stop server</button>
                     <button id="mp-btn-close" style="padding:6px;background:#222;color:#aaa;border:2px outset #555;cursor:pointer;font-family:inherit;font-size:12px;">close (M)</button>
@@ -220,6 +221,86 @@
                         </div>
                     </div>
                 </div>
+                </div>
+            </div>
+            <div id="mp-updates-panel" style="display:none;background:#222;border:4px solid #ffff00;padding:16px;width:260px;max-width:90vw;max-height:80vh;overflow-y:auto;color:#eee;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                    <div style="font-size:16px;color:#ffff00;font-weight:bold;">UPDATES</div>
+                    <button id="mp-updates-close-btn" style="padding:3px 9px;background:#333;color:#aaa;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:12px;">x</button>
+                </div>
+                <div id="mp-updates-list" style="display:flex;flex-direction:column;gap:10px;font-size:11px;line-height:1.4;">
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Stretchy triangles</div>
+                        <div style="color:#ccc;">Triangles can now be resized by width and height independently, using the same drag handles as boxes.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Smoother player collisions</div>
+                        <div style="color:#ccc;">Fixed players getting launched into the air when landing on someone else. You can now jump off another player's head, too.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Compact host settings</div>
+                        <div style="color:#ccc;">The guns / fly-edit host settings now sit as a short list under Controls instead of stretching the menu taller.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Level bugfixes</div>
+                        <div style="color:#ccc;">Fixed the delete button for saved levels doing nothing, and made loading a level much more resilient to bad/old save data.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Rope tool, controls sidebar, built-in levels</div>
+                        <div style="color:#ccc;">Added a rope tool to the build menu (click two props to connect them), a live Controls list on the main menu, and two built-in levels: "Level 1" and an empty "Clean" level.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Fixed level saving/loading</div>
+                        <div style="color:#ccc;">Custom saved levels could silently lose their ropes/constraints on load. Fixed the underlying id mismatch, and added a warning that saved levels can be wiped since the game is still early/unstable.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Main menu + more controls</div>
+                        <div style="color:#ccc;">The multiplayer menu became the Main Menu with a Levels section. You can now also move with the arrow keys and jump with Space.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Cat fixes</div>
+                        <div style="color:#ccc;">Fixed not being able to jump on cat objects, and made the cat photo stretch to fill its box instead of leaving empty space when resized.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Real cat photo</div>
+                        <div style="color:#ccc;">Replaced the cat object's drawn face with an actual cat picture.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">F3X-style build gizmo</div>
+                        <div style="color:#ccc;">Edit mode now has move arrows and resize handles like Roblox's F3X tool. Also fixed resized objects not showing up correctly for other players.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Visible room settings for everyone</div>
+                        <div style="color:#ccc;">Joined players can now see the room settings too (read-only) instead of only the host seeing them.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Host settings panel</div>
+                        <div style="color:#ccc;">The host can now toggle guns (room-wide) and other players' fly/edit mode on or off.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Multiplayer polish</div>
+                        <div style="color:#ccc;">Host can shut down the server with a message to everyone; guns are now visible to other players and shoot lethal lava pellets; anyone named "markeplier" gets a pink mustache.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Grabbed objects + gun cheat</div>
+                        <div style="color:#ccc;">Picking up an object in edit mode now removes its collision while held. Added the "ihaveagun" cheat code for an orbiting pistol that shoots on left click.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Rebindable controls</div>
+                        <div style="color:#ccc;">Added a rebind-keys button so you can remap your controls, saved between visits.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Keyboard-layout-proof controls</div>
+                        <div style="color:#ccc;">Controls now go by physical key position (like where WASD sits) instead of character, so they land correctly on any keyboard layout, and the controls popup shows the right keys automatically.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">More reliable connections</div>
+                        <div style="color:#ccc;">Multiplayer now uses live TURN relay servers (fixes most connection failures) and auto-reconnects if the signaling connection drops.</div>
+                    </div>
+                    <div>
+                        <div style="color:#0f0;font-weight:bold;">Real hosting + multiplayer</div>
+                        <div style="color:#ccc;">Got the game properly hosted online with peer-to-peer multiplayer, instead of only working when opened as a local file.</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1263,6 +1344,14 @@ class LanMultiplayer {
         bind("mp-btn-leave", () => this.leave());
         bind("mp-btn-resync", () => this.resyncLevel());
         bind("mp-btn-close", () => this.toggleMenu(false));
+        bind("mp-btn-updates", () => {
+            const el = document.getElementById("mp-updates-panel");
+            if (el) el.style.display = (el.style.display === "none" || !el.style.display) ? "block" : "none";
+        });
+        bind("mp-updates-close-btn", () => {
+            const el = document.getElementById("mp-updates-panel");
+            if (el) el.style.display = "none";
+        });
         bind("mp-warn-yes", () => {
             this._hideWarn();
             this.createServer();

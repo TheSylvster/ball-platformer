@@ -183,6 +183,7 @@
                         <input id="level-save-name" type="text" placeholder="save current level as..." style="flex:1;min-width:0;padding:5px;background:#000;color:#0f0;border:2px inset #666;font-family:monospace;font-size:12px;">
                         <button id="level-save-btn" style="padding:5px 10px;background:#333;color:#ffff00;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:12px;">save</button>
                     </div>
+                    <div style="font-size:10px;color:#ff8844;margin-top:6px;text-align:center;">⚠ saved levels live only in this browser's storage — this game is early/unstable, so they can get wiped without warning. Don't rely on them long-term.</div>
                     <div id="levels-note" style="font-size:10px;color:#888;margin-top:4px;text-align:center;"></div>
                 </div>
                 <div style="background:#111;border:2px solid #555;padding:8px;margin-bottom:10px;">
@@ -2585,7 +2586,7 @@ class Game {
                         data.props[k] = v;
                 }
             }
-            let obj = createObj(structuredClone({ type: data.type }));
+            let obj = createObj(structuredClone({ type: data.type, physicsType: data.physicsType }));
             function setProps(table, propsData) {
                 // We need to handle initPriority since some properties only appear after others have been set (for example, shape.r)
                 let propsToDo = Object.entries(propsData);
@@ -2626,14 +2627,47 @@ class Game {
         }
     }
     getLevelJSON() {
+        const objs = this.world.objs.filter(o => o.type !== "player");
+        const idOf = new Map();
+        objs.forEach((o, i) => idOf.set(o, i));
         return JSON.stringify({
             levelDataVersion: "v3",
             levelSaveTime: Math.round(Date.now()/1000),
-            objs: this.world.objs.filter(o => o.type !== "player").map(obj => {
-                return obj.serialize();
+            objs: objs.map((obj, i) => {
+                const data = obj.serialize();
+                data.id = i; // loadLevel() links constraints by these ids, not netIds
+                return data;
             }),
-            constraints: this.world.constraintsToOptions(),
+            constraints: this._constraintsToIdOptions(idOf),
         }) + "\n";
+    }
+    // Like World.constraintsToOptions(), but references objects by their
+    // index in this save (idA/idB) instead of network netIds, since
+    // loadLevel() links constraints that way, not by netId.
+    _constraintsToIdOptions(idOf) {
+        let joint = this.world.physicsWorld.getJointList();
+        const arr = [];
+        while(joint) {
+            try {
+                const isRod = joint instanceof planck.DistanceJoint;
+                const isRope = joint instanceof planck.RopeJoint;
+                if(!isRod && !isRope) { joint = joint.getNext(); continue; }
+                const udA = joint.getBodyA().getUserData() || {};
+                const udB = joint.getBodyB().getUserData() || {};
+                const objA = udA.obj, objB = udB.obj;
+                if(!objA || !objB || !idOf.has(objA) || !idOf.has(objB)) { joint = joint.getNext(); continue; }
+                const anchorA = joint.getLocalAnchorA();
+                const anchorB = joint.getLocalAnchorB();
+                arr.push({
+                    type: isRod ? "rod" : "rope",
+                    idA: idOf.get(objA), idB: idOf.get(objB),
+                    lx1: anchorA.x, ly1: anchorA.y,
+                    lx2: anchorB.x, ly2: anchorB.y,
+                });
+            } catch(e) { console.warn("constraint ser", e); }
+            joint = joint.getNext();
+        }
+        return arr;
     }
 }
 

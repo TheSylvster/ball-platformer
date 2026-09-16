@@ -1015,12 +1015,8 @@ registerObjType("cat", class extends PhysicsObj {
         ctx.translate(x, y);
         ctx.rotate(a);
         if(CAT_IMG.complete && CAT_IMG.naturalWidth) {
-            // fit the photo inside the w-by-h box, preserving its aspect ratio
-            const imgAR = CAT_IMG.naturalWidth / CAT_IMG.naturalHeight;
-            const boxAR = w / h;
-            let dw = w, dh = h;
-            if(imgAR > boxAR) dh = w / imgAR; else dw = h * imgAR;
-            ctx.drawImage(CAT_IMG, -dw/2, -dh/2, dw, dh);
+            // stretch the photo to fill the whole w×h box (no letterboxing)
+            ctx.drawImage(CAT_IMG, -w/2, -h/2, w, h);
         } else {
             // fallback while the image loads
             ctx.fillStyle = "#e8a050";
@@ -2871,7 +2867,7 @@ class Player {
                 let isGrounded = false;
                 for(let obj of g.world.objs) {
                     const checkXoff = obj.type === "rotator" ? 0.2 : 0.7;
-                    if((obj.type === "solid" || obj.type === "box" || obj.type === "rotator") && 
+                    if((obj.type === "solid" || obj.type === "box" || obj.type === "rotator" || obj.type === "cat") &&
                         (obj.testPoint(this.body.x, this.body.y+this.body.shape.r+1) || 
                         obj.testPoint(this.body.x+this.body.shape.r*checkXoff, this.body.y + this.body.shape.r+1) || 
                         obj.testPoint(this.body.x-this.body.shape.r*checkXoff, this.body.y + this.body.shape.r+1))) {

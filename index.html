@@ -1933,19 +1933,25 @@ class LanMultiplayer {
     _ensurePeer(id, username, x, y) {
         if (this.peers.has(id)) return;
         const dummyObj = { type: "remote-player", id: id };
+        // kinematic, not dynamic: this body is a puppet driven entirely by
+        // network position/velocity, never by physics forces. As a dynamic
+        // body it used to fight the position-correction code below whenever
+        // it touched the local player -- Box2D would resolve the "overlap"
+        // caused by our own teleport/velocity override by injecting a large
+        // impulse into BOTH bodies, which is what sent players flying when
+        // you landed on the side of someone. Kinematic bodies still shove
+        // dynamic bodies (infinite effective mass) but are themselves never
+        // pushed back, so that feedback loop can't happen.
         const body = this.game.world.physicsWorld.createBody({
-            type: "dynamic",
+            type: "kinematic",
             position: planck.Vec2(x || 0, y || 0),
             fixedRotation: true,
             allowSleep: false,
-            bullet: true,
             userData: { obj: dummyObj, remotePlayer: true, id },
         });
         body.createFixture({
             shape: new planck.Circle(planck.Vec2(0, 0), 20),
-            density: 4.0,   // heavier so they can shove phys boxes
             friction: 0.35,
-            restitution: 0.05,
         });
         try {
             body.setGravityScale(0);
@@ -2129,8 +2135,17 @@ class LanMultiplayer {
                         p.body.setLinearVelocity(planck.Vec2(p.vx || 0, p.vy || 0));
                     } else {
                         const track = 28;
-                        const corrVx = dx * track + (p.vx || 0) * 0.5;
-                        const corrVy = dy * track + (p.vy || 0) * 0.5;
+                        let corrVx = dx * track + (p.vx || 0) * 0.5;
+                        let corrVy = dy * track + (p.vy || 0) * 0.5;
+                        // cap the correction so a momentary position error (e.g.
+                        // from being stood on) can't translate into a launch speed
+                        const MAX_CORR = 500;
+                        const corrMag = Math.hypot(corrVx, corrVy);
+                        if (corrMag > MAX_CORR) {
+                            const s = MAX_CORR / corrMag;
+                            corrVx *= s;
+                            corrVy *= s;
+                        }
                         p.body.setLinearVelocity(planck.Vec2(corrVx, corrVy));
                     }
                     const p2 = p.body.getPosition();
@@ -3091,6 +3106,25 @@ class Player {
                         obj.testPoint(this.body.x+this.body.shape.r*checkXoff, this.body.y + this.body.shape.r+1) || 
                         obj.testPoint(this.body.x-this.body.shape.r*checkXoff, this.body.y + this.body.shape.r+1))) {
                         isGrounded = true;
+                    }
+                }
+                // also allow jumping off another player's head/shoulders
+                if(!isGrounded && g.lan && g.lan.peers) {
+                    const footPts = [
+                        [this.body.x, this.body.y+this.body.shape.r+1],
+                        [this.body.x+this.body.shape.r*0.7, this.body.y+this.body.shape.r+1],
+                        [this.body.x-this.body.shape.r*0.7, this.body.y+this.body.shape.r+1],
+                    ];
+                    for(const p of g.lan.peers.values()) {
+                        if(!p.body || p._noclip) continue;
+                        const pos = p.body.getPosition();
+                        for(const [fx, fy] of footPts) {
+                            if(Math.hypot(fx - pos.x, fy - pos.y) <= 20) {
+                                isGrounded = true;
+                                break;
+                            }
+                        }
+                        if(isGrounded) break;
                     }
                 }
                 if(isGrounded)

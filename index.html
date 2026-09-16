@@ -235,6 +235,10 @@
                 </div>
                 <div id="mp-updates-list" style="display:flex;flex-direction:column;gap:10px;font-size:11px;line-height:1.4;">
                     <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Password moved to its own file</div>
+                        <div style="color:#ccc;">The host password now lives in a separate password.txt file next to the game instead of the game's code, so it can be changed on its own.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
                         <div style="color:#0f0;font-weight:bold;">Multiplayer passwords</div>
                         <div style="color:#ccc;">Creating a server now asks for a host password, and you can set an optional room password that joiners have to enter too. Casual gatekeeping only, not real security.</div>
                     </div>
@@ -1193,13 +1197,16 @@ const TARGET_FPS = 60;
 // just silently failing or crashing.
 const GAME_VERSION = "1.0";
 
-// Password required to click "Create server". Edit this to whatever you
-// want. Note this is only a casual gate, not real security: it's a plain
-// string in client-side source, so anyone who opens devtools can read it
-// (or just call g.lan.createServer() directly, skipping the check
-// entirely). It'll keep out uninvited randoms who don't think to look,
-// nothing more.
-const HOST_PASSWORD = "changeme";
+// Password required to click "Create server". The real value is read from
+// password.txt (a plain-text file next to index.html) at page load, so it
+// can be edited without touching this file; this is only the fallback used
+// if that file can't be fetched (e.g. testing straight off disk). Note
+// this is only a casual gate, not real security either way: password.txt
+// is just as publicly downloadable as this script is, so anyone who opens
+// devtools (or just requests password.txt directly) can read it, or call
+// g.lan.createServer() directly and skip the check entirely. It'll keep
+// out uninvited randoms who don't think to look, nothing more.
+const HOST_PASSWORD_FALLBACK = "changeme";
 
 // Embedded cat photo (from cutecats.net via Wayback Machine, resized/re-encoded to a small static PNG)
 const CAT_IMG = new Image();
@@ -1357,6 +1364,13 @@ class LanMultiplayer {
         this.menuOpen = false;
         this._ready = typeof Peer !== "undefined";
         this._iceServersPromise = this._fetchIceServers();
+        this._hostPasswordPromise = fetch("password.txt")
+            .then(r => r.ok ? r.text() : Promise.reject(new Error("bad status " + r.status)))
+            .then(t => t.trim())
+            .catch(e => {
+                console.warn("Could not load password.txt, falling back to built-in default", e);
+                return HOST_PASSWORD_FALLBACK;
+            });
         // room settings: as host these are what I'm enforcing on everyone else
         // (guns) / other players (fly+edit); as client these are what the
         // host told me is currently allowed
@@ -1468,14 +1482,15 @@ class LanMultiplayer {
         }
     }
 
-    _showWarn() {
+    async _showWarn() {
         if (!this._ready) {
             alert("PeerJS library not loaded. Need internet to load the script, then refresh.");
             return;
         }
+        const expected = await this._hostPasswordPromise;
         const pw = prompt("Host password:");
         if (pw === null) return; // cancelled
-        if (pw !== HOST_PASSWORD) {
+        if (pw !== expected) {
             alert("Wrong password.");
             return;
         }

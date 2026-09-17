@@ -973,52 +973,68 @@ class Game {
         let objs = levelData.objs;
         let objDataByI = new Map(objs.map((obj, i) => [i, obj]));
         let objCreatedByI = new Map(objs.map((obj, i) => [i, null]));
-        for(let [i, data] of objs.entries()) {
-            if(levelData.levelDataVersion === "v2") {
-                data.props = {};
-                for(let [k, v] of Object.entries(data)) {
-                    if(k !== "type" && k !== "id" && k !== "props")
-                        data.props[k] = v;
-                }
-            }
-            let obj = createObj(structuredClone({ type: data.type }));
-            function setProps(table, propsData) {
-                // We need to handle initPriority since some properties only appear after others have been set (for example, shape.r)
-                let propsToDo = Object.entries(propsData);
-                const getPriority = k => table.list().find(p => p.name === k)?.initPriority ?? -Infinity;
-                while(propsToDo.length > 0) {
-                    let prop = propsToDo.sort((a, b) => {
-                        let diff = getPriority(b[0]) - getPriority(a[0]);
-                        if(Number.isNaN(diff)) return 0;
-                        else return diff;
-                    }).shift();
-                    let [k, v] = prop;
+        function setProps(table, propsData) {
+            // We need to handle initPriority since some properties only appear after others have been set (for example, shape.r)
+            let propsToDo = Object.entries(propsData);
+            const getPriority = k => table.list().find(p => p.name === k)?.initPriority ?? -Infinity;
+            while(propsToDo.length > 0) {
+                let prop = propsToDo.sort((a, b) => {
+                    let diff = getPriority(b[0]) - getPriority(a[0]);
+                    if(Number.isNaN(diff)) return 0;
+                    else return diff;
+                }).shift();
+                let [k, v] = prop;
 
-                    let propObj = table.list().find(p => p.name === k);
-                    if(!propObj) throw new Error("prop does not exist but in level data: " + k);
-                    if(propObj.type === "subwritabletable")
-                        setProps(table.get(k), v);
-                    else
-                        table.set(k, v);
+                let propObj = table.list().find(p => p.name === k);
+                // skip unknown props (e.g. "physics", added in a later game
+                // version than this frozen build) instead of throwing and
+                // aborting the whole level load partway through
+                if(!propObj) continue;
+                if(propObj.type === "subwritabletable")
+                    setProps(table.get(k), v);
+                else
+                    table.set(k, v);
+            }
+        }
+        for(let [i, data] of objs.entries()) {
+            try {
+                if(levelData.levelDataVersion === "v2") {
+                    data.props = {};
+                    for(let [k, v] of Object.entries(data)) {
+                        if(k !== "type" && k !== "id" && k !== "props")
+                            data.props[k] = v;
+                    }
                 }
+                let obj = createObj(structuredClone({ type: data.type }));
+                if(data.shape) {
+                    let type = data.shape.type;
+                    delete data.shape.type;
+                    data.shape.type = type;
+                }
+                setProps(obj.props, data.props);
+                objCreatedByI.set(i, obj);
+            } catch(e) {
+                // one bad/unrecognized object shouldn't sink the whole level load
+                console.warn("Failed to load an object from level data, skipping it", data && data.type, e);
             }
-            if(data.shape) {
-                let type = data.shape.type;
-                delete data.shape.type;
-                data.shape.type = type;
-            }
-            setProps(obj.props, data.props);
-            objCreatedByI.set(i, obj);
         }
         for(let constraint of levelData.constraints) {
-            let objA = objCreatedByI.get(levelData.objs.findIndex(o => o.id === constraint.idA));
-            let objB = objCreatedByI.get(levelData.objs.findIndex(o => o.id === constraint.idB));
-            let obj = createObj({ type: "constraint", objA, objB });
-            obj.props.set("variant", constraint.type);
-            obj.props.set("x", objA.body.getWorldPoint(planck.Vec2(constraint.lx1, constraint.ly1)).x);
-            obj.props.set("y", objA.body.getWorldPoint(planck.Vec2(constraint.lx1, constraint.ly1)).y);
-            obj.props.set("x2", objB.body.getWorldPoint(planck.Vec2(constraint.lx2, constraint.ly2)).x);
-            obj.props.set("y2", objB.body.getWorldPoint(planck.Vec2(constraint.lx2, constraint.ly2)).y);
+            try {
+                let objA = objCreatedByI.get(levelData.objs.findIndex(o => o.id === constraint.idA));
+                let objB = objCreatedByI.get(levelData.objs.findIndex(o => o.id === constraint.idB));
+                if(!objA || !objB) {
+                    console.warn("Skipping unresolvable constraint in level data", constraint);
+                    continue;
+                }
+                let obj = createObj({ type: "constraint", objA, objB });
+                obj.props.set("variant", constraint.type);
+                obj.props.set("x", objA.body.getWorldPoint(planck.Vec2(constraint.lx1, constraint.ly1)).x);
+                obj.props.set("y", objA.body.getWorldPoint(planck.Vec2(constraint.lx1, constraint.ly1)).y);
+                obj.props.set("x2", objB.body.getWorldPoint(planck.Vec2(constraint.lx2, constraint.ly2)).x);
+                obj.props.set("y2", objB.body.getWorldPoint(planck.Vec2(constraint.lx2, constraint.ly2)).y);
+            } catch(e) {
+                console.warn("Failed to reconstruct a constraint, skipping it", e);
+            }
         }
     }
     getLevelJSON() {
@@ -1408,8 +1424,17 @@ updateOptionsPanel(mode === "edit");
             return Number.isFinite(v) ? v : null;
         };
 
-        function startRun() {
-            try { g.loadLevel(LEVELS["1"]); } catch(e) {}
+        // reload=true fully reloads the level (R press); reload=false just
+        // repositions the player -- used once on page load, since Game's
+        // own constructor already freshly loaded LEVELS["1"] a moment ago
+        // and reloading it again immediately, before a single physics step
+        // has run, is what was corrupting the level (Planck doesn't like
+        // ~550 bodies being destroyed and recreated in the same tick they
+        // were created in)
+        function startRun(reload) {
+            if(reload) {
+                try { g.loadLevel(LEVELS["1"]); } catch(e) { console.error("speedrun: level reload failed", e); }
+            }
             try {
                 g.plr.body.setPosition(SPEEDRUN_SPAWN.x, SPEEDRUN_SPAWN.y);
                 g.plr.body.clearVelocity();
@@ -1427,7 +1452,7 @@ updateOptionsPanel(mode === "edit");
             const t = document.activeElement;
             if(t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
             if(g && g.plr && g.plr.editMode && g.plr.editMode.active) return; // don't hijack the editor's own controls
-            startRun();
+            startRun(true);
         });
 
         function tick() {
@@ -1448,7 +1473,7 @@ updateOptionsPanel(mode === "edit");
             requestAnimationFrame(tick);
         }
 
-        startRun();
+        startRun(false);
         tick();
     })();
     </script>

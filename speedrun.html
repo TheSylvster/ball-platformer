@@ -1427,12 +1427,12 @@ updateOptionsPanel(mode === "edit");
          opened from localhost. -->
     <script>
     (function() {
-        // Best-guess world coordinates, worked out from the level's saved
-        // object positions cross-referenced against the screenshot you
-        // marked up (pink = spawn, yellow = win). If either is off once
-        // you actually play it, these are the two numbers to nudge --
-        // tell me which way and by how much and I'll adjust them.
-        const SPEEDRUN_SPAWN = { x: -70, y: -258 };
+        // Spawn is the game's own default player position (matches
+        // Player.reset()/die() in this same build). Finish is still a
+        // best-guess, worked out from the level's saved object positions
+        // cross-referenced against the screenshot you marked up -- use the
+        // live x/y readout in the HUD to nudge it if it's off.
+        const SPEEDRUN_SPAWN = { x: 0, y: -20 };
         const SPEEDRUN_FINISH = { x: 190, y: 130, r: 100 };
         const BEST_KEY = "bp_speedrun_best_v1";
 

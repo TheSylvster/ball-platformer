@@ -235,6 +235,10 @@
                 </div>
                 <div id="mp-updates-list" style="display:flex;flex-direction:column;gap:10px;font-size:11px;line-height:1.4;">
                     <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Physics toggle now looks the part</div>
+                        <div style="color:#ccc;">Flipping a prop's "physics" switch on now actually turns it orange (the same physics-object color as before), instead of leaving it looking unchanged. Lava gets an orange outline instead, so it stays recognizable as lava.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
                         <div style="color:#0f0;font-weight:bold;">Copy/paste props</div>
                         <div style="color:#ccc;">Select something in edit mode and press Ctrl+C / Ctrl+V to duplicate it. Repeated pastes fan out so copies don't stack exactly on top of each other.</div>
                     </div>
@@ -1150,7 +1154,11 @@ registerObjType("solid", class extends PhysicsObj {
         this.body = PhysicsObj.createSimpleShapeBody({ obj: this, shape: this.shape, physicsType: "static" });
         this.initPhysicsToggle();
     }
-    draw() { this.renderMySimpleShape("#606060"); }
+    // color follows the live "physics" toggle, not the type name -- a
+    // "solid" with physics switched on looks exactly like a "box", and
+    // vice versa, so the toggle actually reads as turning into/out of a
+    // physics object instead of silently doing nothing visually
+    draw() { this.renderMySimpleShape(this.body.getType() === "dynamic" ? "orange" : "#606060"); }
 });
 registerObjType("box", class extends PhysicsObj {
     constructor(options) {
@@ -1159,7 +1167,7 @@ registerObjType("box", class extends PhysicsObj {
         this.body = PhysicsObj.createSimpleShapeBody({ obj: this, shape: this.shape, physicsType: "dynamic" });
         this.initPhysicsToggle();
     }
-    draw() { this.renderMySimpleShape("orange"); }
+    draw() { this.renderMySimpleShape(this.body.getType() === "dynamic" ? "orange" : "#606060"); }
 });
 registerObjType("lava", class extends PhysicsObj {
     constructor(options) {
@@ -1168,7 +1176,12 @@ registerObjType("lava", class extends PhysicsObj {
         this.body = PhysicsObj.createSimpleShapeBody({ obj: this, shape: this.shape, physicsType: "static" });
         this.initPhysicsToggle();
     }
-    draw() { this.renderMySimpleShape("red"); }
+    draw() {
+        // stays red (it's still lava -- don't lose that warning color),
+        // but gets an orange outline when it's also a physics object
+        this.renderMySimpleShape("red");
+        if(this.body.getType() === "dynamic") this.renderMySimpleShapeOutline("orange");
+    }
 });
 registerObjType("rotator", class extends PhysicsObj {
     constructor(options) {

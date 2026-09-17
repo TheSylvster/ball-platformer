@@ -996,6 +996,9 @@ class Game {
                     table.set(k, v);
             }
         }
+        // temporary on-page diagnostics (window.__srLoadReport) so the
+        // speedrun HUD can show exactly what failed without needing devtools
+        window.__srLoadReport = { total: objs.length, ok: 0, failed: 0, firstError: null };
         for(let [i, data] of objs.entries()) {
             try {
                 if(levelData.levelDataVersion === "v2") {
@@ -1013,8 +1016,11 @@ class Game {
                 }
                 setProps(obj.props, data.props);
                 objCreatedByI.set(i, obj);
+                window.__srLoadReport.ok++;
             } catch(e) {
                 // one bad/unrecognized object shouldn't sink the whole level load
+                window.__srLoadReport.failed++;
+                if(!window.__srLoadReport.firstError) window.__srLoadReport.firstError = (data && data.type) + ": " + e.message;
                 console.warn("Failed to load an object from level data, skipping it", data && data.type, e);
             }
         }
@@ -1416,13 +1422,21 @@ updateOptionsPanel(mode === "edit");
         const elTimer = document.getElementById("sr-timer");
         const elStatus = document.getElementById("sr-status");
 
-        let startTime = null, running = false, finished = false;
+        let startTime = null, armed = false, running = false, finished = false;
 
         const fmt = (sec) => sec.toFixed(2);
         const bestTime = () => {
             const v = parseFloat(localStorage.getItem(BEST_KEY));
             return Number.isFinite(v) ? v : null;
         };
+        // TEMPORARY: shows how many level objects failed to load, straight
+        // in the HUD, so this is diagnosable without opening devtools.
+        // Remove once level loading is confirmed solid.
+        function loadStatusSuffix() {
+            const r = window.__srLoadReport;
+            if(!r || !r.failed) return "";
+            return " · ⚠ " + r.failed + "/" + r.total + " objects failed to load (" + r.firstError + ")";
+        }
 
         // reload=true fully reloads the level (R press); reload=false just
         // repositions the player -- used once on page load, since Game's
@@ -1439,12 +1453,13 @@ updateOptionsPanel(mode === "edit");
                 g.plr.body.setPosition(SPEEDRUN_SPAWN.x, SPEEDRUN_SPAWN.y);
                 g.plr.body.clearVelocity();
             } catch(e) {}
-            startTime = performance.now();
-            running = true;
+            armed = false; // timer doesn't start counting until you actually move
+            running = false;
             finished = false;
-            if(elTimer) elTimer.style.color = "#0f0";
+            startTime = null;
+            if(elTimer) { elTimer.style.color = "#0f0"; elTimer.textContent = "0.00"; }
             const best = bestTime();
-            if(elStatus) elStatus.textContent = "R: restart run" + (best !== null ? " · best: " + fmt(best) + "s" : "");
+            if(elStatus) elStatus.textContent = "Move to start · R: restart" + (best !== null ? " · best: " + fmt(best) + "s" : "") + loadStatusSuffix();
         }
 
         window.addEventListener("keydown", (e) => {
@@ -1456,18 +1471,29 @@ updateOptionsPanel(mode === "edit");
         });
 
         function tick() {
-            if(running && !finished && g && g.plr && elTimer) {
-                const elapsed = (performance.now() - startTime) / 1000;
-                elTimer.textContent = fmt(elapsed);
-                const dx = g.plr.body.x - SPEEDRUN_FINISH.x, dy = g.plr.body.y - SPEEDRUN_FINISH.y;
-                if(Math.hypot(dx, dy) <= SPEEDRUN_FINISH.r) {
-                    finished = true;
-                    running = false;
-                    const best = bestTime();
-                    const isNewBest = best === null || elapsed < best;
-                    if(isNewBest) localStorage.setItem(BEST_KEY, String(elapsed));
-                    elTimer.style.color = "#ffff00";
-                    if(elStatus) elStatus.textContent = (isNewBest ? "New best! " : ("best: " + fmt(best) + "s · ")) + "Press R to run again";
+            if(!finished && g && g.plr && g.plr.keysDown && elTimer) {
+                if(!armed) {
+                    const k = g.plr.keysDown;
+                    if(k.a || k.d || k.w || k.s || k.ArrowLeft || k.ArrowRight || k.ArrowUp || k.ArrowDown) {
+                        armed = true;
+                        running = true;
+                        startTime = performance.now();
+                        if(elStatus) elStatus.textContent = "R: restart run" + loadStatusSuffix();
+                    }
+                }
+                if(running) {
+                    const elapsed = (performance.now() - startTime) / 1000;
+                    elTimer.textContent = fmt(elapsed);
+                    const dx = g.plr.body.x - SPEEDRUN_FINISH.x, dy = g.plr.body.y - SPEEDRUN_FINISH.y;
+                    if(Math.hypot(dx, dy) <= SPEEDRUN_FINISH.r) {
+                        finished = true;
+                        running = false;
+                        const best = bestTime();
+                        const isNewBest = best === null || elapsed < best;
+                        if(isNewBest) localStorage.setItem(BEST_KEY, String(elapsed));
+                        elTimer.style.color = "#ffff00";
+                        if(elStatus) elStatus.textContent = (isNewBest ? "New best! " : ("best: " + fmt(best) + "s · ")) + "Press R to run again";
+                    }
                 }
             }
             requestAnimationFrame(tick);

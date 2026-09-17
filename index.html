@@ -3473,6 +3473,7 @@ class EditMode {
 
         window.addEventListener("keydown", (e) => {
             if(!this.active) return;
+            if(e.repeat) return; // ignore OS key-auto-repeat from holding a key down
             const t = document.activeElement;
             if(t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
             const ctrl = e.ctrlKey || e.metaKey;

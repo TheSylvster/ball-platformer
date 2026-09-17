@@ -236,8 +236,8 @@
                 </div>
                 <div id="mp-updates-list" style="display:flex;flex-direction:column;gap:10px;font-size:11px;line-height:1.4;">
                     <div style="border-bottom:1px solid #444;padding-bottom:8px;">
-                        <div style="color:#0f0;font-weight:bold;">Weight now scales with object size</div>
-                        <div style="color:#ccc;">Physics props now weigh more the bigger they are, uncapped -- a giant box will actually shove a small one out of the way instead of pushing back like it's the same size.</div>
+                        <div style="color:#0f0;font-weight:bold;">Fixed: game-breaking physics crash, weight now scales with size</div>
+                        <div style="color:#ccc;">The last update's uncapped weight scaling could make a physics prop so heavy or so light that the physics engine crashed every single frame, freezing the whole game. Weight still scales with how big a prop is (a giant box now shoves a small one out of the way instead of pushing back like it's the same size), just within a range the engine can actually handle.</div>
                     </div>
                     <div style="border-bottom:1px solid #444;padding-bottom:8px;">
                         <div style="color:#0f0;font-weight:bold;">Fixed: holding paste made copies fly off-screen</div>
@@ -890,13 +890,16 @@ class PhysicsObj extends Obj {
         return body;
     }
     static createSimpleShapeFixture({ body, shape, friction }) {
-        // constant density (calibrated so a 20-radius-circle-sized prop
-        // weighs about the same as the player, mass 1) -- Planck derives
-        // mass = density * area on its own, so weight now scales
-        // automatically and uncapped with how big the object actually is,
-        // instead of the old fixed mass range that flattened out for
-        // anything bigger than a player-sized shape
-        const density = 1 / (20 * 20 * Math.PI);
+        // mass scales with area (calibrated so a 20-radius-circle-sized
+        // prop weighs about the same as the player, mass 1), but clamped --
+        // Planck's contact/TOI solver goes numerically unstable (throws on
+        // every physics step) once a dynamic body's mass is either near
+        // zero or a huge multiple of whatever it's colliding with, so a
+        // truly uncapped mass can silently break the whole simulation the
+        // moment a big or tiny prop turns into a physics object
+        const area = PhysicsObj.getSimpleShapeArea(shape);
+        const mass = Math.max(Math.min(area / (20 * 20 * Math.PI), 15), 0.15);
+        const density = area > 0 && isFinite(mass / area) ? mass / area : 0;
         let fixture = body.createFixture({
             shape: PhysicsObj.createSimpleShape(shape),
             density,
@@ -932,6 +935,17 @@ class PhysicsObj extends Obj {
                 planck.Vec2(-w / 2, h / 2),
             ]);
         } else throw new Error("Unknown shape type in createShape: " + shapeOptions.type);
+    }
+    static getSimpleShapeArea(shapeOptions) {
+        if(shapeOptions.type === "box") {
+            return assert_num(shapeOptions.w) * assert_num(shapeOptions.h);
+        } else if(shapeOptions.type === "ball") {
+            return Math.PI * assert_num(shapeOptions.r) * shapeOptions.r;
+        } else if(shapeOptions.type === "triangle") {
+            const w = shapeOptions.w ?? (shapeOptions.s || 40);
+            const h = shapeOptions.h ?? ((shapeOptions.s || 40) * 0.866);
+            return 0.5 * w * h;
+        } else throw new Error("Unknown shape type in getArea: " + shapeOptions.type);
     }
     static renderSimpleShape(shapeOptions, x, y, angle) {
         if(shapeOptions.type === "box") {

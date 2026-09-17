@@ -236,8 +236,12 @@
                 </div>
                 <div id="mp-updates-list" style="display:flex;flex-direction:column;gap:10px;font-size:11px;line-height:1.4;">
                     <div style="border-bottom:1px solid #444;padding-bottom:8px;">
-                        <div style="color:#0f0;font-weight:bold;">Weight/friction multipliers for physics props</div>
-                        <div style="color:#ccc;">Solid/box/lava/cat/rotator props now have "weightMult" and "frictionMult" number fields in their properties, so you can make an individual prop heavier/lighter or grippier/slicker than its size and default friction alone would give it.</div>
+                        <div style="color:#0f0;font-weight:bold;">Fixed: paste still drifted on repeated presses</div>
+                        <div style="color:#ccc;">Pressing Ctrl+V several times without moving the mouse was still nudging each copy further down-right. Pastes now always land exactly centered on the mouse, every time.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Size-based weight is now opt-in</div>
+                        <div style="color:#ccc;">Weight scaling with a prop's size is now an "autoWeight" checkbox, off by default -- every prop is mass 1 (like the player) unless you switch it on. "weightMult" and "frictionMult" number fields let you push an individual prop heavier/lighter or grippier/slicker either way.</div>
                     </div>
                     <div style="border-bottom:1px solid #444;padding-bottom:8px;">
                         <div style="color:#0f0;font-weight:bold;">Speedrun timer is now a plain stopwatch</div>
@@ -897,26 +901,26 @@ class PhysicsObj extends Obj {
         PhysicsObj.createSimpleShapeFixture({ body, shape, friction });
         return body;
     }
-    // mass scales with area (calibrated so a 20-radius-circle-sized prop
-    // weighs about the same as the player, mass 1), but clamped -- Planck's
-    // contact/TOI solver goes numerically unstable (throws on every physics
-    // step) once a dynamic body's mass is either near zero or a huge
-    // multiple of whatever it's colliding with, so a truly uncapped mass
-    // can silently break the whole simulation the moment a big or tiny prop
-    // turns into a physics object. weightMult lets a level author push an
-    // individual prop heavier/lighter than its size alone would suggest,
-    // still clamped to the same engine-safe range for the same reason.
-    static computeMass(area, weightMult) {
-        const baseMass = Math.max(Math.min(area / (20 * 20 * Math.PI), 15), 0.15);
+    // With autoWeight off (the default), every prop just gets mass 1, same
+    // as the player -- weightMult alone controls how heavy it feels. With
+    // autoWeight on, mass instead scales with the shape's area (calibrated
+    // so a 20-radius-circle-sized prop still comes out to about mass 1),
+    // clamped -- Planck's contact/TOI solver goes numerically unstable
+    // (throws on every physics step) once a dynamic body's mass is either
+    // near zero or a huge multiple of whatever it's colliding with, so a
+    // truly uncapped mass can silently break the whole simulation the
+    // moment a big or tiny prop turns into a physics object.
+    static computeMass(area, weightMult, autoWeight) {
+        const baseMass = autoWeight ? Math.max(Math.min(area / (20 * 20 * Math.PI), 15), 0.15) : 1;
         // widen the final clamp beyond the base [0.15, 15] range so the
         // multiplier actually does something even on a prop that's already
         // at the size-based cap, while still staying well inside the range
         // Planck's solver tolerates (see comment above)
         return Math.max(Math.min(baseMass * (weightMult ?? 1), 50), 0.05);
     }
-    static createSimpleShapeFixture({ body, shape, friction, weightMult }) {
+    static createSimpleShapeFixture({ body, shape, friction, weightMult, autoWeight }) {
         const area = PhysicsObj.getSimpleShapeArea(shape);
-        const mass = PhysicsObj.computeMass(area, weightMult);
+        const mass = PhysicsObj.computeMass(area, weightMult, autoWeight);
         const density = area > 0 && isFinite(mass / area) ? mass / area : 0;
         let fixture = body.createFixture({
             shape: PhysicsObj.createSimpleShape(shape),
@@ -929,7 +933,7 @@ class PhysicsObj extends Obj {
         this.shape = shape;
         const friction = this.body.getFixtureList().getFriction();
         this.body.destroyFixture(this.body.getFixtureList());
-        PhysicsObj.createSimpleShapeFixture({ body: this.body, shape, friction, weightMult: this._weightMult });
+        PhysicsObj.createSimpleShapeFixture({ body: this.body, shape, friction, weightMult: this._weightMult, autoWeight: this._autoWeight });
     }
     static createSimpleShape(shapeOptions) {
         if(shapeOptions.type === "box") {
@@ -1099,29 +1103,40 @@ class PhysicsObj extends Obj {
         this.body = null; // set by subclass
         this._weightMult = 1;
         this._frictionMult = 1;
+        this._autoWeight = false; // off by default -- every prop is mass 1 until this is switched on
         this._baseFriction = 0.4;
     }
 
-    // Exposes "weightMult"/"frictionMult" number props that scale this
-    // object's mass and friction relative to what its size/default friction
-    // would otherwise give it -- e.g. weightMult 2 makes it push around like
-    // twice as heavy, frictionMult 0 makes it frictionless. Call once, after
-    // the body/fixture already exist, from any subclass that wants the
-    // props exposed (weight only matters once "physics" is also on, but
-    // friction matters for static/kinematic bodies too, so it's separate
-    // from initPhysicsToggle).
+    // Exposes "autoWeight"/"weightMult"/"frictionMult" props that control
+    // this object's mass and friction relative to what it'd otherwise get
+    // (mass 1, the same as the player, and its type's default friction).
+    // autoWeight is off by default; switching it on makes mass scale with
+    // the shape's size instead of staying flat. weightMult/frictionMult
+    // apply on top of that either way -- e.g. weightMult 2 makes it push
+    // around like twice as heavy, frictionMult 0 makes it frictionless.
+    // Call once, after the body/fixture already exist, from any subclass
+    // that wants the props exposed (weight only matters once "physics" is
+    // also on, but friction matters for static/kinematic bodies too, so
+    // it's separate from initPhysicsToggle).
     initWeightFrictionMultipliers() {
         this._baseFriction = this.body.getFixtureList().getFriction();
         this.props.handler({
             list: () => [
+                { name: "autoWeight", type: "boolean" },
                 { name: "weightMult", type: "number" },
                 { name: "frictionMult", type: "number" },
             ],
-            get: (k) => k === "weightMult" ? this._weightMult : this._frictionMult,
+            get: (k) => {
+                if(k === "autoWeight") return this._autoWeight;
+                return k === "weightMult" ? this._weightMult : this._frictionMult;
+            },
             set: (k, v) => {
-                v = assert_num(v);
-                if(k === "weightMult") this._weightMult = Math.max(0.1, Math.min(v, 10));
-                else this._frictionMult = Math.max(0, Math.min(v, 5));
+                if(k === "autoWeight") this._autoWeight = !!v;
+                else {
+                    v = assert_num(v);
+                    if(k === "weightMult") this._weightMult = Math.max(0.1, Math.min(v, 10));
+                    else this._frictionMult = Math.max(0, Math.min(v, 5));
+                }
                 this._applyWeightFriction();
             },
         });
@@ -1130,7 +1145,7 @@ class PhysicsObj extends Obj {
         const fixture = this.body.getFixtureList();
         if(!fixture) return;
         const area = PhysicsObj.getSimpleShapeArea(this.shape);
-        const mass = PhysicsObj.computeMass(area, this._weightMult);
+        const mass = PhysicsObj.computeMass(area, this._weightMult, this._autoWeight);
         fixture.setDensity(area > 0 && isFinite(mass / area) ? mass / area : 0);
         fixture.setFriction(this._baseFriction * this._frictionMult);
         this.body.resetMassData();
@@ -3535,7 +3550,6 @@ class EditMode {
         this.ropeToolActive = false;
         this._ropeStart = null; // { obj, x, y } once the first endpoint is picked
         this._clipboard = []; // serialized props, from copy/paste (Ctrl+C/V)
-        this._pasteCount = 0; // successive Ctrl+V presses fan pastes out further
         this._moveSet = null; // objects (selection + rope-connected followers) being dragged
 
         this.propsPanel = document.querySelector("#props-panel") || document.createElement("div");
@@ -3893,14 +3907,13 @@ class EditMode {
             .filter(o => o && o.type !== "player" && o.type !== "constraint")
             .map(o => { try { return o.serialize(); } catch(e) { return null; } })
             .filter(Boolean);
-        this._pasteCount = 0;
-        this._lastPasteMouseX = null;
-        this._lastPasteMouseY = null;
     }
     _pasteClipboard() {
         if(!this._clipboard.length) return;
 
-        // center the pasted selection's bounding-box on the mouse
+        // center the pasted selection's bounding-box on the mouse -- always
+        // exactly there, no fan-out, so repeated Ctrl+V at a still mouse
+        // just stacks copies on top of each other instead of drifting
         let sumX = 0, sumY = 0, n = 0;
         for(const data of this._clipboard) {
             if(data.props && typeof data.props.x === "number" && typeof data.props.y === "number") {
@@ -3911,19 +3924,8 @@ class EditMode {
         }
         const cx = n ? sumX / n : 0, cy = n ? sumY / n : 0;
 
-        // if the mouse hasn't moved since the last paste (e.g. rapid Ctrl+V),
-        // fan pastes out a little so they don't stack exactly on top of each other
-        if(this._lastPasteMouseX === this.mouseX && this._lastPasteMouseY === this.mouseY) {
-            this._pasteCount++;
-        } else {
-            this._pasteCount = 0;
-        }
-        this._lastPasteMouseX = this.mouseX;
-        this._lastPasteMouseY = this.mouseY;
-        const fanOff = 24 * this._pasteCount;
-
-        const dx = (this.mouseX - cx) + fanOff;
-        const dy = (this.mouseY - cy) + fanOff;
+        const dx = this.mouseX - cx;
+        const dy = this.mouseY - cy;
 
         const pasted = [];
         for(const data of this._clipboard) {

@@ -52,6 +52,10 @@
             text-align:center;pointer-events:none;">
             <div id="sr-timer" style="font-size:26px;line-height:1.1;">0.00</div>
             <div id="sr-status" style="font-size:11px;color:#aaa;min-height:1.3em;">R: restart run</div>
+            <!-- TEMPORARY: live x/y so spawn/finish coords can be read off
+                 directly instead of guessed from screenshots. Remove once
+                 SPEEDRUN_SPAWN/SPEEDRUN_FINISH are confirmed correct. -->
+            <div id="sr-coords" style="font-size:10px;color:#666;">x: - y: -</div>
         </div>
     </main>
 
@@ -149,7 +153,9 @@ class World {
         editSel = [];
         */
         for(let obj of this.objs.slice()) {
-            if(obj.type !== "player") obj.destroy();
+            if(obj.type !== "player") {
+                try { obj.destroy(); } catch(e) { console.warn("Failed to destroy an object during clear()", obj.type, e); }
+            }
         }
     }
 
@@ -456,7 +462,18 @@ class Constraint extends Obj {
 
     destroy() {
         super.destroy();
-        throw new Error("TODO destroy constraint");
+        // was an unconditional throw ("TODO destroy constraint") -- this is
+        // exactly what R was hitting: World.clear() destroys every solid/
+        // box/lava object first (which also auto-destroys their attached
+        // joints), then reaches the leftover Constraint objects and this
+        // throw aborted the whole reset() -> loadLevel() call right there,
+        // before any new objects got created. Wrapped in try/catch since
+        // the joint may already be gone (auto-destroyed along with a body
+        // it was attached to, earlier in that same clear() pass).
+        if(this.joint) {
+            try { g.world.physicsWorld.destroyJoint(this.joint); } catch(e) {}
+            this.joint = null;
+        }
     }
 }
 registerObjType("constraint", Constraint);
@@ -1421,6 +1438,7 @@ updateOptionsPanel(mode === "edit");
 
         const elTimer = document.getElementById("sr-timer");
         const elStatus = document.getElementById("sr-status");
+        const elCoords = document.getElementById("sr-coords");
 
         let startTime = null, armed = false, running = false, finished = false;
 
@@ -1471,6 +1489,9 @@ updateOptionsPanel(mode === "edit");
         });
 
         function tick() {
+            if(elCoords && g && g.plr) {
+                elCoords.textContent = "x: " + g.plr.body.x.toFixed(1) + " y: " + g.plr.body.y.toFixed(1);
+            }
             if(!finished && g && g.plr && g.plr.keysDown && elTimer) {
                 if(!armed) {
                     const k = g.plr.keysDown;

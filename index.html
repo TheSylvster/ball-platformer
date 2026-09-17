@@ -236,6 +236,10 @@
                 </div>
                 <div id="mp-updates-list" style="display:flex;flex-direction:column;gap:10px;font-size:11px;line-height:1.4;">
                     <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Speedrun timer is now a plain stopwatch</div>
+                        <div style="color:#ccc;">Removed the finish-line detection that used to auto-stop the clock. It now just starts counting when you move and keeps running until you press R to restart.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
                         <div style="color:#0f0;font-weight:bold;">Fixed: game-breaking physics crash, weight now scales with size</div>
                         <div style="color:#ccc;">The last update's uncapped weight scaling could make a physics prop so heavy or so light that the physics engine crashed every single frame, freezing the whole game. Weight still scales with how big a prop is (a giant box now shoves a small one out of the way instead of pushing back like it's the same size), just within a range the engine can actually handle.</div>
                     </div>

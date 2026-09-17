@@ -52,9 +52,9 @@
             text-align:center;pointer-events:none;">
             <div id="sr-timer" style="font-size:26px;line-height:1.1;">0.00</div>
             <div id="sr-status" style="font-size:11px;color:#aaa;min-height:1.3em;">R: restart run</div>
-            <!-- TEMPORARY: live x/y so spawn/finish coords can be read off
+            <!-- TEMPORARY: live x/y so spawn coords can be read off
                  directly instead of guessed from screenshots. Remove once
-                 SPEEDRUN_SPAWN/SPEEDRUN_FINISH are confirmed correct. -->
+                 SPEEDRUN_SPAWN is confirmed correct. -->
             <div id="sr-coords" style="font-size:10px;color:#666;">x: - y: -</div>
         </div>
     </main>
@@ -1419,34 +1419,25 @@ updateOptionsPanel(mode === "edit");
 
 </script>
 
-    <!-- Speedrun validation: timer, R-to-reset (level + position + timer),
-         ends when you reach the marked finish spot. This is a frozen copy
-         of the V1.0 build specifically so runs can't be done with any of
-         the sandbox/fly/gun stuff added in later versions -- edit mode is
-         already locked out above (g.lockEditMode) whenever this isn't
-         opened from localhost. -->
+    <!-- Speedrun validation: a plain stopwatch that starts counting the
+         moment you move and only resets on R -- no finish line, it never
+         stops itself. This is a frozen copy of the V1.0 build specifically
+         so runs can't be done with any of the sandbox/fly/gun stuff added
+         in later versions -- edit mode is already locked out above
+         (g.lockEditMode) whenever this isn't opened from localhost. -->
     <script>
     (function() {
         // Spawn is the game's own default player position (matches
-        // Player.reset()/die() in this same build). Finish is still a
-        // best-guess, worked out from the level's saved object positions
-        // cross-referenced against the screenshot you marked up -- use the
-        // live x/y readout in the HUD to nudge it if it's off.
+        // Player.reset()/die() in this same build).
         const SPEEDRUN_SPAWN = { x: 0, y: -20 };
-        const SPEEDRUN_FINISH = { x: 190, y: 130, r: 100 };
-        const BEST_KEY = "bp_speedrun_best_v1";
 
         const elTimer = document.getElementById("sr-timer");
         const elStatus = document.getElementById("sr-status");
         const elCoords = document.getElementById("sr-coords");
 
-        let startTime = null, armed = false, running = false, finished = false;
+        let startTime = null, armed = false, running = false;
 
         const fmt = (sec) => sec.toFixed(2);
-        const bestTime = () => {
-            const v = parseFloat(localStorage.getItem(BEST_KEY));
-            return Number.isFinite(v) ? v : null;
-        };
         // TEMPORARY: shows how many level objects failed to load, straight
         // in the HUD, so this is diagnosable without opening devtools.
         // Remove once level loading is confirmed solid.
@@ -1473,11 +1464,9 @@ updateOptionsPanel(mode === "edit");
             } catch(e) {}
             armed = false; // timer doesn't start counting until you actually move
             running = false;
-            finished = false;
             startTime = null;
             if(elTimer) { elTimer.style.color = "#0f0"; elTimer.textContent = "0.00"; }
-            const best = bestTime();
-            if(elStatus) elStatus.textContent = "Move to start · R: restart" + (best !== null ? " · best: " + fmt(best) + "s" : "") + loadStatusSuffix();
+            if(elStatus) elStatus.textContent = "Move to start · R: restart" + loadStatusSuffix();
         }
 
         window.addEventListener("keydown", (e) => {
@@ -1492,7 +1481,7 @@ updateOptionsPanel(mode === "edit");
             if(elCoords && g && g.plr) {
                 elCoords.textContent = "x: " + g.plr.body.x.toFixed(1) + " y: " + g.plr.body.y.toFixed(1);
             }
-            if(!finished && g && g.plr && g.plr.keysDown && elTimer) {
+            if(g && g.plr && g.plr.keysDown && elTimer) {
                 if(!armed) {
                     const k = g.plr.keysDown;
                     if(k.a || k.d || k.w || k.s || k.ArrowLeft || k.ArrowRight || k.ArrowUp || k.ArrowDown) {
@@ -1505,16 +1494,6 @@ updateOptionsPanel(mode === "edit");
                 if(running) {
                     const elapsed = (performance.now() - startTime) / 1000;
                     elTimer.textContent = fmt(elapsed);
-                    const dx = g.plr.body.x - SPEEDRUN_FINISH.x, dy = g.plr.body.y - SPEEDRUN_FINISH.y;
-                    if(Math.hypot(dx, dy) <= SPEEDRUN_FINISH.r) {
-                        finished = true;
-                        running = false;
-                        const best = bestTime();
-                        const isNewBest = best === null || elapsed < best;
-                        if(isNewBest) localStorage.setItem(BEST_KEY, String(elapsed));
-                        elTimer.style.color = "#ffff00";
-                        if(elStatus) elStatus.textContent = (isNewBest ? "New best! " : ("best: " + fmt(best) + "s · ")) + "Press R to run again";
-                    }
                 }
             }
             requestAnimationFrame(tick);

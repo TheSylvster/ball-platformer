@@ -236,6 +236,10 @@
                 </div>
                 <div id="mp-updates-list" style="display:flex;flex-direction:column;gap:10px;font-size:11px;line-height:1.4;">
                     <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Weight/friction multipliers for physics props</div>
+                        <div style="color:#ccc;">Solid/box/lava/cat/rotator props now have "weightMult" and "frictionMult" number fields in their properties, so you can make an individual prop heavier/lighter or grippier/slicker than its size and default friction alone would give it.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
                         <div style="color:#0f0;font-weight:bold;">Speedrun timer is now a plain stopwatch</div>
                         <div style="color:#ccc;">Removed the finish-line detection that used to auto-stop the clock. It now just starts counting when you move and keeps running until you press R to restart.</div>
                     </div>
@@ -893,16 +897,26 @@ class PhysicsObj extends Obj {
         PhysicsObj.createSimpleShapeFixture({ body, shape, friction });
         return body;
     }
-    static createSimpleShapeFixture({ body, shape, friction }) {
-        // mass scales with area (calibrated so a 20-radius-circle-sized
-        // prop weighs about the same as the player, mass 1), but clamped --
-        // Planck's contact/TOI solver goes numerically unstable (throws on
-        // every physics step) once a dynamic body's mass is either near
-        // zero or a huge multiple of whatever it's colliding with, so a
-        // truly uncapped mass can silently break the whole simulation the
-        // moment a big or tiny prop turns into a physics object
+    // mass scales with area (calibrated so a 20-radius-circle-sized prop
+    // weighs about the same as the player, mass 1), but clamped -- Planck's
+    // contact/TOI solver goes numerically unstable (throws on every physics
+    // step) once a dynamic body's mass is either near zero or a huge
+    // multiple of whatever it's colliding with, so a truly uncapped mass
+    // can silently break the whole simulation the moment a big or tiny prop
+    // turns into a physics object. weightMult lets a level author push an
+    // individual prop heavier/lighter than its size alone would suggest,
+    // still clamped to the same engine-safe range for the same reason.
+    static computeMass(area, weightMult) {
+        const baseMass = Math.max(Math.min(area / (20 * 20 * Math.PI), 15), 0.15);
+        // widen the final clamp beyond the base [0.15, 15] range so the
+        // multiplier actually does something even on a prop that's already
+        // at the size-based cap, while still staying well inside the range
+        // Planck's solver tolerates (see comment above)
+        return Math.max(Math.min(baseMass * (weightMult ?? 1), 50), 0.05);
+    }
+    static createSimpleShapeFixture({ body, shape, friction, weightMult }) {
         const area = PhysicsObj.getSimpleShapeArea(shape);
-        const mass = Math.max(Math.min(area / (20 * 20 * Math.PI), 15), 0.15);
+        const mass = PhysicsObj.computeMass(area, weightMult);
         const density = area > 0 && isFinite(mass / area) ? mass / area : 0;
         let fixture = body.createFixture({
             shape: PhysicsObj.createSimpleShape(shape),
@@ -915,7 +929,7 @@ class PhysicsObj extends Obj {
         this.shape = shape;
         const friction = this.body.getFixtureList().getFriction();
         this.body.destroyFixture(this.body.getFixtureList());
-        PhysicsObj.createSimpleShapeFixture({ body: this.body, shape, friction });
+        PhysicsObj.createSimpleShapeFixture({ body: this.body, shape, friction, weightMult: this._weightMult });
     }
     static createSimpleShape(shapeOptions) {
         if(shapeOptions.type === "box") {
@@ -1083,6 +1097,43 @@ class PhysicsObj extends Obj {
     constructor(options) {
         super(options);
         this.body = null; // set by subclass
+        this._weightMult = 1;
+        this._frictionMult = 1;
+        this._baseFriction = 0.4;
+    }
+
+    // Exposes "weightMult"/"frictionMult" number props that scale this
+    // object's mass and friction relative to what its size/default friction
+    // would otherwise give it -- e.g. weightMult 2 makes it push around like
+    // twice as heavy, frictionMult 0 makes it frictionless. Call once, after
+    // the body/fixture already exist, from any subclass that wants the
+    // props exposed (weight only matters once "physics" is also on, but
+    // friction matters for static/kinematic bodies too, so it's separate
+    // from initPhysicsToggle).
+    initWeightFrictionMultipliers() {
+        this._baseFriction = this.body.getFixtureList().getFriction();
+        this.props.handler({
+            list: () => [
+                { name: "weightMult", type: "number" },
+                { name: "frictionMult", type: "number" },
+            ],
+            get: (k) => k === "weightMult" ? this._weightMult : this._frictionMult,
+            set: (k, v) => {
+                v = assert_num(v);
+                if(k === "weightMult") this._weightMult = Math.max(0.1, Math.min(v, 10));
+                else this._frictionMult = Math.max(0, Math.min(v, 5));
+                this._applyWeightFriction();
+            },
+        });
+    }
+    _applyWeightFriction() {
+        const fixture = this.body.getFixtureList();
+        if(!fixture) return;
+        const area = PhysicsObj.getSimpleShapeArea(this.shape);
+        const mass = PhysicsObj.computeMass(area, this._weightMult);
+        fixture.setDensity(area > 0 && isFinite(mass / area) ? mass / area : 0);
+        fixture.setFriction(this._baseFriction * this._frictionMult);
+        this.body.resetMassData();
     }
 
     // Exposes a "physics" checkbox in the props panel that flips this
@@ -1177,6 +1228,7 @@ registerObjType("solid", class extends PhysicsObj {
         this.initSimpleShape();
         this.body = PhysicsObj.createSimpleShapeBody({ obj: this, shape: this.shape, physicsType: "static" });
         this.initPhysicsToggle();
+        this.initWeightFrictionMultipliers();
     }
     // color follows the live "physics" toggle, not the type name -- a
     // "solid" with physics switched on looks exactly like a "box", and
@@ -1190,6 +1242,7 @@ registerObjType("box", class extends PhysicsObj {
         this.initSimpleShape();
         this.body = PhysicsObj.createSimpleShapeBody({ obj: this, shape: this.shape, physicsType: "dynamic" });
         this.initPhysicsToggle();
+        this.initWeightFrictionMultipliers();
     }
     draw() { this.renderMySimpleShape(this.body.getType() === "dynamic" ? "orange" : "#606060"); }
 });
@@ -1199,6 +1252,7 @@ registerObjType("lava", class extends PhysicsObj {
         this.initSimpleShape();
         this.body = PhysicsObj.createSimpleShapeBody({ obj: this, shape: this.shape, physicsType: "static" });
         this.initPhysicsToggle();
+        this.initWeightFrictionMultipliers();
     }
     draw() {
         // stays red (it's still lava -- don't lose that warning color),
@@ -1212,6 +1266,7 @@ registerObjType("rotator", class extends PhysicsObj {
         super(options);
         this.initSimpleShape();
         this.body = PhysicsObj.createSimpleShapeBody({ obj: this, shape: this.shape, physicsType: "kinematic", angularVelocity: 0.04*60 });
+        this.initWeightFrictionMultipliers(); // weight doesn't affect a kinematic body, but friction still matters for what's riding on it
     }
     draw() { this.renderMySimpleShape("#33ccff"); }
 });
@@ -1229,6 +1284,7 @@ registerObjType("cat", class extends PhysicsObj {
         const pType = options.physicsType || "static";
         this.body = PhysicsObj.createSimpleShapeBody({ obj: this, shape: this.shape, physicsType: pType });
         this.initPhysicsToggle();
+        this.initWeightFrictionMultipliers();
     }
     draw() {
         const ctx = g.canv.ctx;

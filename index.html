@@ -245,7 +245,7 @@
                     </div>
                     <div style="border-bottom:1px solid #444;padding-bottom:8px;">
                         <div style="color:#0f0;font-weight:bold;">Copy/paste props</div>
-                        <div style="color:#ccc;">Select something in edit mode and press Ctrl+C / Ctrl+V to duplicate it. Repeated pastes fan out so copies don't stack exactly on top of each other.</div>
+                        <div style="color:#ccc;">Select something in edit mode and press Ctrl+C / Ctrl+V to duplicate it. Pastes now drop centered on your mouse cursor; repeated pastes without moving the mouse fan out so copies don't stack exactly on top of each other.</div>
                     </div>
                     <div style="border-bottom:1px solid #444;padding-bottom:8px;">
                         <div style="color:#0f0;font-weight:bold;">Physics on/off, no separate object needed</div>
@@ -3818,17 +3818,43 @@ class EditMode {
             .map(o => { try { return o.serialize(); } catch(e) { return null; } })
             .filter(Boolean);
         this._pasteCount = 0;
+        this._lastPasteMouseX = null;
+        this._lastPasteMouseY = null;
     }
     _pasteClipboard() {
         if(!this._clipboard.length) return;
-        this._pasteCount++;
-        const off = 24 * this._pasteCount; // fan successive pastes out so they don't stack exactly on top of each other
+
+        // center the pasted selection's bounding-box on the mouse
+        let sumX = 0, sumY = 0, n = 0;
+        for(const data of this._clipboard) {
+            if(data.props && typeof data.props.x === "number" && typeof data.props.y === "number") {
+                sumX += data.props.x;
+                sumY += data.props.y;
+                n++;
+            }
+        }
+        const cx = n ? sumX / n : 0, cy = n ? sumY / n : 0;
+
+        // if the mouse hasn't moved since the last paste (e.g. rapid Ctrl+V),
+        // fan pastes out a little so they don't stack exactly on top of each other
+        if(this._lastPasteMouseX === this.mouseX && this._lastPasteMouseY === this.mouseY) {
+            this._pasteCount++;
+        } else {
+            this._pasteCount = 0;
+        }
+        this._lastPasteMouseX = this.mouseX;
+        this._lastPasteMouseY = this.mouseY;
+        const fanOff = 24 * this._pasteCount;
+
+        const dx = (this.mouseX - cx) + fanOff;
+        const dy = (this.mouseY - cy) + fanOff;
+
         const pasted = [];
         for(const data of this._clipboard) {
             const clone = structuredClone(data);
             if(clone.props) {
-                if(typeof clone.props.x === "number") clone.props.x += off;
-                if(typeof clone.props.y === "number") clone.props.y += off;
+                if(typeof clone.props.x === "number") clone.props.x += dx;
+                if(typeof clone.props.y === "number") clone.props.y += dy;
             }
             const obj = applySerializedObj(clone);
             if(!obj) continue;

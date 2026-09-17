@@ -236,6 +236,10 @@
                 </div>
                 <div id="mp-updates-list" style="display:flex;flex-direction:column;gap:10px;font-size:11px;line-height:1.4;">
                     <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">weightMult/frictionMult limits removed</div>
+                        <div style="color:#ccc;">Both fields used to be capped (weightMult 0.1-10, frictionMult 0-5). Now you can type any value you want, in either direction -- the only floor left is that weightMult can't go to zero or negative, since that's not a real mass.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
                         <div style="color:#0f0;font-weight:bold;">Fixed: paste still drifted on repeated presses</div>
                         <div style="color:#ccc;">Pressing Ctrl+V several times without moving the mouse was still nudging each copy further down-right. Pastes now always land exactly centered on the mouse, every time.</div>
                     </div>
@@ -1133,9 +1137,18 @@ class PhysicsObj extends Obj {
             set: (k, v) => {
                 if(k === "autoWeight") this._autoWeight = !!v;
                 else {
+                    // no upper limit on either, and no lower limit on friction
+                    // (0 = frictionless is valid) -- weightMult only gets
+                    // floored just above 0 since negative/zero mass isn't a
+                    // physically meaningful value to hand Planck, not an
+                    // arbitrary restriction on how extreme you can push it.
+                    // The engine-stability clamp on the final computed mass
+                    // (computeMass, see its comment) is separate and still
+                    // applies regardless of how large weightMult is, since
+                    // that's what actually crashed the game before.
                     v = assert_num(v);
-                    if(k === "weightMult") this._weightMult = Math.max(0.1, Math.min(v, 10));
-                    else this._frictionMult = Math.max(0, Math.min(v, 5));
+                    if(k === "weightMult") this._weightMult = Math.max(v, 0.001);
+                    else this._frictionMult = Math.max(v, 0);
                 }
                 this._applyWeightFriction();
             },

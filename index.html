@@ -235,6 +235,18 @@
                 </div>
                 <div id="mp-updates-list" style="display:flex;flex-direction:column;gap:10px;font-size:11px;line-height:1.4;">
                     <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Copy/paste props</div>
+                        <div style="color:#ccc;">Select something in edit mode and press Ctrl+C / Ctrl+V to duplicate it. Repeated pastes fan out so copies don't stack exactly on top of each other.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Physics on/off, no separate object needed</div>
+                        <div style="color:#ccc;">Solid/box/lava/cat props now all have a "physics" checkbox in their properties, so any one of them can become a falling/pushable physics object (or stop being one) any time, instead of needing a separate palette entry for it.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Ropes drag their connected props along</div>
+                        <div style="color:#ccc;">Dragging a prop (by hand or with the gizmo's move arrows) now brings along anything roped to it instead of leaving the rope's other end behind.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
                         <div style="color:#0f0;font-weight:bold;">Password moved to its own file</div>
                         <div style="color:#ccc;">The host password now lives in a separate password.txt file next to the game instead of the game's code, so it can be changed on its own.</div>
                     </div>
@@ -380,6 +392,7 @@
             <div style="padding:4px 6px;">
                 <button id="rope-tool-btn" style="width:100%;padding:6px;background:#333;color:#0ff;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:12px;">🪢 rope tool: off</button>
                 <div id="rope-tool-hint" style="font-size:10px;color:#aaa;margin-top:4px;min-height:2.4em;"></div>
+                <div style="font-size:10px;color:#888;margin-top:2px;">X: delete &nbsp;·&nbsp; Ctrl+C / Ctrl+V: copy / paste</div>
             </div>
             <div style="background:#333;color:#ffff00;padding:6px 8px;font-weight:bold;border-top:2px solid #ffff00;border-bottom:2px solid #ffff00;margin-top:8px;font-size:13px;">
                 selected props
@@ -1044,6 +1057,28 @@ class PhysicsObj extends Obj {
         this.body = null; // set by subclass
     }
 
+    // Exposes a "physics" checkbox in the props panel that flips this
+    // object's body between static and dynamic at runtime, so any solid/
+    // box/lava/cat prop can become a physics object (or stop being one)
+    // without needing a separate palette entry or object type for it.
+    // Not used by kinematic bodies (the rotator) -- their motion is the
+    // whole point of that type, so it doesn't make sense to toggle it.
+    initPhysicsToggle() {
+        this.props.handler({
+            list: () => [{ name: "physics", type: "boolean" }],
+            get: () => this.body.getType() === "dynamic",
+            set: (k, v) => {
+                if(v) this.body.setDynamic();
+                else {
+                    this.body.setStatic();
+                    this.body.setLinearVelocity(planck.Vec2(0, 0));
+                    this.body.setAngularVelocity(0);
+                }
+                if(this.body.setAwake) this.body.setAwake(true);
+            },
+        });
+    }
+
     get x() { return this.body.getPosition().x; }
     get y() { return this.body.getPosition().y; }
     set x(value) { this.body.setPosition(planck.Vec2(value, this.body.getPosition().y)); }
@@ -1113,6 +1148,7 @@ registerObjType("solid", class extends PhysicsObj {
         super(options);
         this.initSimpleShape();
         this.body = PhysicsObj.createSimpleShapeBody({ obj: this, shape: this.shape, physicsType: "static" });
+        this.initPhysicsToggle();
     }
     draw() { this.renderMySimpleShape("#606060"); }
 });
@@ -1121,6 +1157,7 @@ registerObjType("box", class extends PhysicsObj {
         super(options);
         this.initSimpleShape();
         this.body = PhysicsObj.createSimpleShapeBody({ obj: this, shape: this.shape, physicsType: "dynamic" });
+        this.initPhysicsToggle();
     }
     draw() { this.renderMySimpleShape("orange"); }
 });
@@ -1129,6 +1166,7 @@ registerObjType("lava", class extends PhysicsObj {
         super(options);
         this.initSimpleShape();
         this.body = PhysicsObj.createSimpleShapeBody({ obj: this, shape: this.shape, physicsType: "static" });
+        this.initPhysicsToggle();
     }
     draw() { this.renderMySimpleShape("red"); }
 });
@@ -1141,21 +1179,19 @@ registerObjType("rotator", class extends PhysicsObj {
     draw() { this.renderMySimpleShape("#33ccff"); }
 });
 
-// Decorative / physics cat (uses box hitbox, draws a cat face)
+// Decorative / physics cat (uses box hitbox, draws a cat face). Whether
+// it's a physics cat is just the shared "physics" toggle now (see
+// PhysicsObj.initPhysicsToggle) -- options.physicsType is only read here
+// as the initial value, for old saves and the palette's cat/phys-cat
+// buttons; toggling it live works exactly like solid/box/lava do.
 registerObjType("cat", class extends PhysicsObj {
     constructor(options) {
         super(options);
         this.shape = options.shape || { type: "box", w: 48, h: 48 };
         this.initSimpleShape();
         const pType = options.physicsType || "static";
-        this._physicsType = pType;
         this.body = PhysicsObj.createSimpleShapeBody({ obj: this, shape: this.shape, physicsType: pType });
-        this.isPhysicsCat = pType === "dynamic";
-    }
-    serialize() {
-        const base = super.serialize();
-        base.physicsType = this._physicsType || (this.isPhysicsCat ? "dynamic" : "static");
-        return base;
+        this.initPhysicsToggle();
     }
     draw() {
         const ctx = g.canv.ctx;
@@ -1172,7 +1208,7 @@ registerObjType("cat", class extends PhysicsObj {
             ctx.fillRect(-w/2, -h/2, w, h);
         }
         // label
-        if(this.isPhysicsCat) {
+        if(this.body.getType() === "dynamic") {
             ctx.fillStyle = "#ffff00";
             ctx.font = "10px Comic Sans MS, cursive";
             ctx.fillText("PHYS", -14, h/2 - 4);
@@ -2522,8 +2558,6 @@ class LanMultiplayer {
                 let s;
                 try { s = o.serialize(); } catch(e) { console.warn("ser", o.type, e); return null; }
                 s.netId = o._netId;
-                if(o._physicsType) s.physicsType = o._physicsType;
-                if(o.isPhysicsCat) s.physicsType = "dynamic";
                 if(s.props) {
                     if(typeof s.props.x === "number" && !Number.isFinite(s.props.x)) s.props.x = 0;
                     if(typeof s.props.y === "number" && !Number.isFinite(s.props.y)) s.props.y = 0;
@@ -3403,6 +3437,9 @@ class EditMode {
         this.gizmoDrag = null; // F3X-style move/resize gizmo drag state
         this.ropeToolActive = false;
         this._ropeStart = null; // { obj, x, y } once the first endpoint is picked
+        this._clipboard = []; // serialized props, from copy/paste (Ctrl+C/V)
+        this._pasteCount = 0; // successive Ctrl+V presses fan pastes out further
+        this._moveSet = null; // objects (selection + rope-connected followers) being dragged
 
         this.propsPanel = document.querySelector("#props-panel") || document.createElement("div");
         this.sidebar = document.querySelector("#edit-sidebar");
@@ -3413,10 +3450,19 @@ class EditMode {
         this._initRopeTool();
 
         window.addEventListener("keydown", (e) => {
-            if(!this.active || this.sel.length === 0 || e.code !== "KeyX") return;
+            if(!this.active) return;
             const t = document.activeElement;
             if(t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
-            this._deleteSel();
+            const ctrl = e.ctrlKey || e.metaKey;
+            if(e.code === "KeyX" && this.sel.length > 0) {
+                this._deleteSel();
+            } else if(ctrl && e.code === "KeyC" && this.sel.length > 0) {
+                e.preventDefault();
+                this._copySel();
+            } else if(ctrl && e.code === "KeyV" && this._clipboard.length > 0) {
+                e.preventDefault();
+                this._pasteClipboard();
+            }
         });
 
         this.mDown = false;
@@ -3740,6 +3786,39 @@ class EditMode {
         }
         this.setSel([]);
     }
+    // Copy/paste doesn't carry ropes between copied props along -- only
+    // the props themselves. Reconnecting them with the rope tool afterward
+    // is one click; duplicating constraint graphs correctly is a lot more
+    // code for a rare case.
+    _copySel() {
+        this._clipboard = this.sel
+            .filter(o => o && o.type !== "player" && o.type !== "constraint")
+            .map(o => { try { return o.serialize(); } catch(e) { return null; } })
+            .filter(Boolean);
+        this._pasteCount = 0;
+    }
+    _pasteClipboard() {
+        if(!this._clipboard.length) return;
+        this._pasteCount++;
+        const off = 24 * this._pasteCount; // fan successive pastes out so they don't stack exactly on top of each other
+        const pasted = [];
+        for(const data of this._clipboard) {
+            const clone = structuredClone(data);
+            if(clone.props) {
+                if(typeof clone.props.x === "number") clone.props.x += off;
+                if(typeof clone.props.y === "number") clone.props.y += off;
+            }
+            const obj = applySerializedObj(clone);
+            if(!obj) continue;
+            pasted.push(obj);
+            if(g.lan && g.lan.role) {
+                const netId = "p" + Math.random().toString(36).slice(2, 10);
+                obj._netId = netId;
+                g.lan.broadcastSpawn(obj, netId);
+            }
+        }
+        if(pasted.length) this.setSel(pasted);
+    }
     registerDestroyedObj(obj) { // Called by object class
         if(this.sel.includes(obj))
             this.setSel(this.sel.filter(o => o !== obj));
@@ -3762,6 +3841,13 @@ class EditMode {
                 if(Math.hypot(x - h.x, y - h.y) > HIT_R) continue;
                 this.currAction = "gizmo";
                 this._freezeForGrab(obj, true);
+                // moving (not resizing) drags anything rope/rod-connected
+                // along with it, same as a plain click-drag does
+                const isMove = h.kind === "move-x" || h.kind === "move-y";
+                const followers = isMove
+                    ? this._ropeConnectedSet([obj]).filter(o => o !== obj).map(o => ({ obj: o, startX: o.x, startY: o.y }))
+                    : [];
+                for(const f of followers) this._freezeForGrab(f.obj, true);
                 this.gizmoDrag = {
                     obj,
                     handle: h,
@@ -3769,6 +3855,7 @@ class EditMode {
                     startObjY: obj.y,
                     startAngle: (typeof obj.angle === "number") ? obj.angle : 0,
                     startShape: structuredClone(obj.shape),
+                    followers,
                 };
                 if(h.kind === "resize-box") {
                     // world position of the OPPOSITE corner/edge, which stays put
@@ -3802,18 +3889,22 @@ class EditMode {
         }
         if(this.currAction === "gizmo") {
             const obj = this.gizmoDrag && this.gizmoDrag.obj;
+            const followers = (this.gizmoDrag && this.gizmoDrag.followers) || [];
             if(obj) this._freezeForGrab(obj, false);
+            for(const f of followers) this._freezeForGrab(f.obj, false);
             this.currAction = "none";
             if(obj && g.lan && g.lan.role) {
-                try { g.lan.broadcastObjMoves([obj]); } catch(e) { console.warn(e); }
+                try { g.lan.broadcastObjMoves([obj, ...followers.map(f => f.obj)]); } catch(e) { console.warn(e); }
             }
             this.gizmoDrag = null;
         } else if(this.currAction === "move") {
-            for(let obj of this.sel) this._freezeForGrab(obj, false);
+            const moveSet = this._moveSet || this.sel;
+            for(let obj of moveSet) this._freezeForGrab(obj, false);
             this.currAction = "none";
+            this._moveSet = null;
             // sync moved props for BOTH host and joiner
             if(g.lan && g.lan.role) {
-                try { g.lan.broadcastObjMoves(this.sel); } catch(e) { console.warn(e); }
+                try { g.lan.broadcastObjMoves(moveSet); } catch(e) { console.warn(e); }
             }
         } else if(this.currAction === "marquee") {
             // shift/ctrl-drag over empty space, Windows-desktop-icon style:
@@ -3841,13 +3932,14 @@ class EditMode {
             this.sel.includes(g.world.getObjFromClickPoint(this.mDownX, this.mDownY)) &&
             Math.hypot(x-this.mDownX, y-this.mDownY) >= 5) {
             this.currAction = "move";
-            for(let obj of this.sel) {
+            this._moveSet = this._ropeConnectedSet(this.sel);
+            for(let obj of this._moveSet) {
                 this._freezeForGrab(obj, true);
                 obj.x += x-this.mDownX;
                 obj.y += y-this.mDownY;
             }
         } else if(this.currAction === "move") {
-            for(let obj of this.sel) {
+            for(let obj of this._moveSet || this.sel) {
                 this._freezeForGrab(obj, true);
                 obj.x += dx;
                 obj.y += dy;
@@ -3903,11 +3995,17 @@ class EditMode {
         return handles;
     }
     _applyGizmoDrag(mx, my) {
-        const { obj, handle, startAngle, startShape, anchorWorld } = this.gizmoDrag;
+        const { obj, handle, startAngle, startShape, anchorWorld, followers } = this.gizmoDrag;
         if(handle.kind === "move-x") {
-            obj.x = this.gizmoDrag.startObjX + (mx - handle.cx);
+            const newX = this.gizmoDrag.startObjX + (mx - handle.cx);
+            const delta = newX - this.gizmoDrag.startObjX;
+            obj.x = newX;
+            for(const f of followers) f.obj.x = f.startX + delta;
         } else if(handle.kind === "move-y") {
-            obj.y = this.gizmoDrag.startObjY + (my - handle.cy);
+            const newY = this.gizmoDrag.startObjY + (my - handle.cy);
+            const delta = newY - this.gizmoDrag.startObjY;
+            obj.y = newY;
+            for(const f of followers) f.obj.y = f.startY + delta;
         } else if(handle.kind === "resize-box") {
             const c = Math.cos(startAngle), s = Math.sin(startAngle);
             const dxw = mx - anchorWorld.x, dyw = my - anchorWorld.y;
@@ -3990,6 +4088,37 @@ class EditMode {
         ctx.restore();
     }
 
+    // Returns startObjs plus everything transitively rope/rod-connected to
+    // any of them, so dragging one prop pulls its whole roped assembly
+    // along instead of leaving connected props stranded behind (the
+    // constraint's joint doesn't do this on its own during a drag, since
+    // _freezeForGrab deactivates the dragged body's physics entirely).
+    _ropeConnectedSet(startObjs) {
+        const set = new Set(startObjs);
+        const frontier = [...startObjs];
+        while(frontier.length) {
+            const o = frontier.pop();
+            let joint = g.world.physicsWorld.getJointList();
+            while(joint) {
+                try {
+                    if(joint instanceof planck.DistanceJoint || joint instanceof planck.RopeJoint) {
+                        const udA = joint.getBodyA().getUserData() || {};
+                        const udB = joint.getBodyB().getUserData() || {};
+                        const objA = udA.obj, objB = udB.obj;
+                        let other = null;
+                        if(objA === o && objB) other = objB;
+                        else if(objB === o && objA) other = objA;
+                        if(other && other.type !== "player" && !set.has(other)) {
+                            set.add(other);
+                            frontier.push(other);
+                        }
+                    }
+                } catch(e) {}
+                joint = joint.getNext();
+            }
+        }
+        return [...set];
+    }
     _freezeForGrab(obj, frozen) {
         if(!obj || !obj.body) return;
         try {

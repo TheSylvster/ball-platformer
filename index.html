@@ -237,6 +237,10 @@
                 </div>
                 <div id="mp-updates-list" style="display:flex;flex-direction:column;gap:10px;font-size:11px;line-height:1.4;">
                     <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Rename saved levels, imports auto-save</div>
+                        <div style="color:#ccc;">Custom saved levels now have a "rename" button next to load/del. Importing a .txt level also saves it into your levels list automatically (as "Imported level", or "Imported level (2)" etc. if that name's taken) instead of only loading it into the current session.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
                         <div style="color:#0f0;font-weight:bold;">Press R to reset to spawn</div>
                         <div style="color:#ccc;">The speedrun build's "R to restart" now also works in the regular game -- press R any time you're not in edit mode to snap back to the spawn point, same as falling in lava. Rebindable from the controls popup like the other keys.</div>
                     </div>
@@ -1612,8 +1616,10 @@ class LanMultiplayer {
             this.elLevelsList.addEventListener("click", (e) => {
                 const loadKey = e.target.getAttribute("data-load");
                 const delKey = e.target.getAttribute("data-del");
+                const renameKey = e.target.getAttribute("data-rename");
                 if (loadKey) this._loadLevelByKey(loadKey);
                 else if (delKey) this._deleteSavedLevel(delKey);
+                else if (renameKey) this._renameSavedLevel(renameKey);
             });
         }
         this._refreshLevelsList();
@@ -1767,6 +1773,7 @@ class LanMultiplayer {
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escName}</span>
             <span style="display:flex;gap:4px;flex-shrink:0;">
                 <button data-load="${escKey}" ${dis} style="padding:3px 8px;background:#333;color:#0f0;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:11px;">load</button>
+                ${isCustom ? `<button data-rename="${escKey}" ${dis} style="padding:3px 8px;background:#330;color:#ff0;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:11px;">rename</button>` : ""}
                 ${isCustom ? `<button data-del="${escKey}" ${dis} style="padding:3px 8px;background:#400;color:#f88;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:11px;">del</button>` : ""}
             </span>
         </div>`;
@@ -1836,6 +1843,32 @@ class LanMultiplayer {
         this._setSavedLevels(saved);
         this._refreshLevelsList();
     }
+    _renameSavedLevel(key) {
+        if (!this._canManageLevels()) return;
+        if (!key.startsWith("s:")) return; // only custom saves are renameable
+        const oldName = key.slice(2);
+        const saved = this._getSavedLevels();
+        if (!(oldName in saved)) return;
+        const newName = prompt("Rename level:", oldName);
+        if (newName === null) return; // cancelled
+        const trimmed = newName.trim();
+        if (!trimmed) { alert("Type a name for the level first"); return; }
+        if (trimmed === oldName) return;
+        if (trimmed in saved && !confirm('A level named "' + trimmed + '" already exists. Overwrite it?')) return;
+        saved[trimmed] = saved[oldName];
+        delete saved[oldName];
+        this._setSavedLevels(saved);
+        this._refreshLevelsList();
+        this._setStatus('Renamed level to "' + trimmed + '"');
+    }
+    // picks "Imported level", or "Imported level (2)", (3), ... if taken
+    _uniqueSavedLevelName(baseName) {
+        const saved = this._getSavedLevels();
+        if (!(baseName in saved)) return baseName;
+        let i = 2;
+        while ((baseName + " (" + i + ")") in saved) i++;
+        return baseName + " (" + i + ")";
+    }
     _exportLevel() {
         // read-only (doesn't touch the shared level), so unlike save/load/
         // delete this is allowed for clients too, not just the host
@@ -1886,8 +1919,13 @@ class LanMultiplayer {
                 alert("Failed to load level: " + e.message);
                 return;
             }
+            const name = this._uniqueSavedLevelName("Imported level");
+            const saved = this._getSavedLevels();
+            saved[name] = text;
+            this._setSavedLevels(saved);
+            this._refreshLevelsList();
             if (this.role === "host") this.sendFullLevel();
-            this._setStatus("Level imported");
+            this._setStatus('Level imported and saved as "' + name + '"');
             this.toggleMenu(false);
         };
         reader.readAsText(file);

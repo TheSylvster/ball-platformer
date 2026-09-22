@@ -237,6 +237,10 @@
                 </div>
                 <div id="mp-updates-list" style="display:flex;flex-direction:column;gap:10px;font-size:11px;line-height:1.4;">
                     <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Faster with lots of physics objects (ball pools!)</div>
+                        <div style="color:#ccc;">Physics props that are nowhere near the visible area no longer get drawn every frame -- handy once you pile up a big ball pool bigger than the screen. In multiplayer, objects that have settled and gone to sleep also stop getting re-broadcast every tick, cutting network/CPU load once a big pool of balls stops moving.</div>
+                    </div>
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
                         <div style="color:#0f0;font-weight:bold;">Rename saved levels, imports auto-save</div>
                         <div style="color:#ccc;">Custom saved levels now have a "rename" button next to load/del. Importing a .txt level also saves it into your levels list automatically (as "Imported level", or "Imported level (2)" etc. if that name's taken) instead of only loading it into the current session.</div>
                     </div>
@@ -1033,6 +1037,28 @@ class PhysicsObj extends Obj {
     renderMySimpleShape(color) {
         g.canv.ctx.fillStyle = color;
         PhysicsObj.renderSimpleShape(this.shape, this.x, this.y, this.angle);
+    }
+    // rough radius of a circle that fully contains this shape, used for
+    // cheap on-screen checks -- doesn't need to be exact, just not smaller
+    // than the real shape, so a big ball pool piled up off the edge of the
+    // screen doesn't spend time drawing (or serializing over the network)
+    // balls nobody can see
+    static shapeBoundingRadius(shape) {
+        if(shape.type === "ball") return shape.r;
+        if(shape.type === "box") return Math.hypot(shape.w, shape.h) / 2;
+        if(shape.type === "triangle") {
+            const w = shape.w ?? (shape.s || 40);
+            const h = shape.h ?? ((shape.s || 40) * 0.866);
+            return Math.hypot(w, h) / 2;
+        }
+        return 64;
+    }
+    isOnScreen(margin = 40) {
+        const r = PhysicsObj.shapeBoundingRadius(this.shape) + margin;
+        const ct = g.canv.camTransform;
+        const x = this.x, y = this.y;
+        return x >= -ct[4] - r && x <= g.canv.width - ct[4] + r
+            && y >= -ct[5] - r && y <= g.canv.height - ct[5] + r;
     }
     renderMySimpleShapeOutline(color) {
         g.canv.ctx.strokeStyle = color;
@@ -2449,6 +2475,18 @@ class LanMultiplayer {
             if (!o.body) continue;
             if (o.type === "solid" || o.type === "lava") continue;
             try {
+                // once a body has gone to sleep (settled, e.g. a ball pool
+                // piling up), it isn't moving -- send one last snapshot so
+                // peers land on its final resting spot, then skip it every
+                // tick after that instead of re-serializing/re-broadcasting
+                // an unchanging position for every sleeping ball
+                const isAwake = o.body.isAwake ? o.body.isAwake() : true;
+                if (!isAwake) {
+                    if (o._netSleptSynced) continue;
+                    o._netSleptSynced = true;
+                } else {
+                    o._netSleptSynced = false;
+                }
                 if (!o._netId) o._netId = "p" + Math.random().toString(36).slice(2, 10);
                 const pos = o.body.getPosition();
                 const vel = o.body.getLinearVelocity ? o.body.getLinearVelocity() : { x: 0, y: 0 };
@@ -2987,8 +3025,12 @@ class Game {
             this.canv.ctx.textAlign = "left";
         }
 
-        // objs
+        // objs -- skip drawing physics objects that are nowhere near the
+        // visible area (e.g. a ball pool piled up off-screen) since a
+        // fillStyle+arc+fill per invisible ball adds up fast with hundreds
+        // of them
         for(let obj of this.world.objs) {
+            if(obj.type !== "player" && obj.isOnScreen && !obj.isOnScreen()) continue;
             obj.draw();
             /*
             if(mode === "edit" && editSel.includes(obj)) {

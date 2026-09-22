@@ -122,7 +122,8 @@
                     <tr><td style="padding:5px 8px; color:#ffff00;"><b id="ctrl-label-w">W</b></td><td style="padding:5px 8px;">jump</td></tr>
                     <tr style="background:#2a2a2a;"><td style="padding:5px 8px; color:#ffff00;"><b id="ctrl-label-f">F</b></td><td style="padding:5px 8px;">fly mode (cheat)</td></tr>
                     <tr><td style="padding:5px 8px; color:#ffff00;"><b id="ctrl-label-e">E</b></td><td style="padding:5px 8px;">edit mode + props</td></tr>
-                    <tr style="background:#2a2a2a;"><td style="padding:5px 8px; color:#ffff00;"><b>Shift</b></td><td style="padding:5px 8px;">go faster</td></tr>
+                    <tr style="background:#2a2a2a;"><td style="padding:5px 8px; color:#ffff00;"><b id="ctrl-label-r">R</b></td><td style="padding:5px 8px;">reset to spawn</td></tr>
+                    <tr><td style="padding:5px 8px; color:#ffff00;"><b>Shift</b></td><td style="padding:5px 8px;">go faster</td></tr>
                     <tr><td style="padding:5px 8px; color:#ffff00;"><b>Click</b></td><td style="padding:5px 8px;">select stuff (edit mode)</td></tr>
                     <tr style="background:#2a2a2a;"><td style="padding:5px 8px; color:#ffff00;"><b id="ctrl-label-m">M</b></td><td style="padding:5px 8px;">main menu (multiplayer + levels)</td></tr>
                 </table>
@@ -235,6 +236,10 @@
                     <button id="mp-updates-close-btn" style="padding:3px 9px;background:#333;color:#aaa;border:2px outset #888;cursor:pointer;font-family:inherit;font-size:12px;">x</button>
                 </div>
                 <div id="mp-updates-list" style="display:flex;flex-direction:column;gap:10px;font-size:11px;line-height:1.4;">
+                    <div style="border-bottom:1px solid #444;padding-bottom:8px;">
+                        <div style="color:#0f0;font-weight:bold;">Press R to reset to spawn</div>
+                        <div style="color:#ccc;">The speedrun build's "R to restart" now also works in the regular game -- press R any time you're not in edit mode to snap back to the spawn point, same as falling in lava. Rebindable from the controls popup like the other keys.</div>
+                    </div>
                     <div style="border-bottom:1px solid #444;padding-bottom:8px;">
                         <div style="color:#0f0;font-weight:bold;">weightMult/frictionMult limits removed</div>
                         <div style="color:#ccc;">Both fields used to be capped (weightMult 0.1-10, frictionMult 0-5). Now you can type any value you want, in either direction -- the only floor left is that weightMult can't go to zero or negative, since that's not a real mass.</div>
@@ -1401,7 +1406,7 @@ function drawMustacheIfMarkeplier(ctx, x, y, username) {
 
 // Rebindable controls (physical key positions – see BP_KEYBINDS.<action>).
 // Persisted so a player's remapping survives page reloads.
-const KEYBIND_DEFAULTS = { left: "KeyA", right: "KeyD", jump: "KeyW", down: "KeyS", fly: "KeyF", edit: "KeyE", multiplayer: "KeyM" };
+const KEYBIND_DEFAULTS = { left: "KeyA", right: "KeyD", jump: "KeyW", down: "KeyS", fly: "KeyF", edit: "KeyE", multiplayer: "KeyM", reset: "KeyR" };
 const KEYBIND_STORAGE_KEY = "bp_keybinds";
 function loadKeybinds() {
     try {
@@ -3345,6 +3350,16 @@ class Player {
                 }
             }
 
+            // Reset to spawn (R) -- regular play only, not while editing
+            if(e.code === window.BP_KEYBINDS.reset && !e.ctrlKey && !e.altKey && !e.metaKey && !this.editMode.active) {
+                if(document.activeElement && (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "SELECT" || document.activeElement.tagName === "TEXTAREA")) {
+                    // allow typing "r" in inputs
+                } else {
+                    e.preventDefault();
+                    this.die();
+                }
+            }
+
             // Multiplayer menu (M)
             if(e.code === window.BP_KEYBINDS.multiplayer && !e.ctrlKey && !e.altKey && !e.metaKey) {
                 if(document.activeElement && (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "SELECT" || document.activeElement.tagName === "TEXTAREA")) {
@@ -4373,7 +4388,7 @@ updateOptionsPanel(mode === "edit");
     // (Chrome/Edge only). Players can also fully rebind any action to any
     // physical key via the "rebind keys" button, stored in window.BP_KEYBINDS
     // (see KEYBIND_DEFAULTS / loadKeybinds / saveKeybinds, defined earlier).
-    const POPUP_LABEL_ACTIONS = { left: "a", right: "d", jump: "w", fly: "f", edit: "e", multiplayer: "m" };
+    const POPUP_LABEL_ACTIONS = { left: "a", right: "d", jump: "w", fly: "f", edit: "e", multiplayer: "m", reset: "r" };
     const REBIND_ROWS = [
         { action: "left", label: "move left" },
         { action: "right", label: "move right" },
@@ -4382,6 +4397,7 @@ updateOptionsPanel(mode === "edit");
         { action: "fly", label: "fly mode" },
         { action: "edit", label: "edit mode" },
         { action: "multiplayer", label: "main menu" },
+        { action: "reset", label: "reset to spawn" },
     ];
     const SPECIAL_CODE_NAMES = {
         Space: "SPACE", Enter: "ENTER", Tab: "TAB", Escape: "ESC",
